@@ -590,15 +590,21 @@ class AdminService:
         try:
             payload = json.loads(line)
             if isinstance(payload, dict):
+                ts = (
+                    payload.get("ts")
+                    or payload.get("time")
+                    or payload.get("timestamp")
+                )
                 return {
                     "source": str(path),
+                    "ts": ts if isinstance(ts, str) else None,
                     "level": payload.get("level") or payload.get("event") or "info",
                     "message": payload.get("message") or payload.get("event") or line,
                     "raw": payload,
                 }
         except json.JSONDecodeError:
             pass
-        return {"source": str(path), "level": "log", "message": line, "raw": line}
+        return {"source": str(path), "ts": None, "level": "log", "message": line, "raw": line}
 
     async def test_bind(self, host: str, port: int) -> dict[str, object]:
         allowed = {"127.0.0.1", "::1", self.config.api.host, self.config.gateway.host}

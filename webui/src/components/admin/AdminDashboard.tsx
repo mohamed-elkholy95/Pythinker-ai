@@ -731,6 +731,14 @@ function flattenRecord(value: Record<string, unknown>, prefix = ""): Array<[stri
   return rows;
 }
 
+function formatLogTimestamp(ts: string | null | undefined): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  // HH:MM:SS — keep dense, the row is already constrained.
+  return d.toLocaleTimeString();
+}
+
 function LogsView({ data }: { data: AdminSurfaces }) {
   return (
     <Panel title="Log Feed" icon={<FileText className="h-4 w-4" />}>
@@ -738,16 +746,27 @@ function LogsView({ data }: { data: AdminSurfaces }) {
         {data.logs.entries.length === 0 ? (
           <div className="p-4 text-sm text-muted-foreground">No log entries found.</div>
         ) : (
-          data.logs.entries.map((entry, index) => (
-            <div key={index} className="grid gap-1 border-b border-border/50 p-3 text-xs last:border-0">
-              <div className="flex items-center gap-2">
-                <span className="rounded-full bg-muted px-2 py-0.5 uppercase text-muted-foreground">
-                  {entry.level ?? "log"}
-                </span>
-                <span className="truncate font-mono">{entry.message ?? ""}</span>
+          data.logs.entries.map((entry, index) => {
+            const stamp = formatLogTimestamp(entry.ts ?? null);
+            return (
+              <div
+                key={index}
+                className="grid gap-1 border-b border-border/50 p-3 text-xs last:border-0"
+              >
+                <div className="flex items-center gap-2">
+                  {stamp && (
+                    <span className="shrink-0 font-mono tabular-nums text-muted-foreground">
+                      {stamp}
+                    </span>
+                  )}
+                  <span className="rounded-full bg-muted px-2 py-0.5 uppercase text-muted-foreground">
+                    {entry.level ?? "log"}
+                  </span>
+                  <span className="truncate font-mono">{entry.message ?? ""}</span>
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </Panel>

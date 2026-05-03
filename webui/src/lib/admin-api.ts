@@ -195,7 +195,13 @@ export interface AdminSurfaces {
   infrastructure: Record<string, unknown>;
   debug: Record<string, unknown>;
   logs: {
-    entries: Array<Record<string, unknown> & { level?: string; message?: string }>;
+    entries: Array<
+      Record<string, unknown> & {
+        level?: string;
+        message?: string;
+        ts?: string | null;
+      }
+    >;
     sources?: string[];
     truncated?: boolean;
   };

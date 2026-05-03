@@ -180,7 +180,13 @@ vi.mock("@/lib/admin-api", () => ({
       subagents_running: 0,
       session_cache_max: 256,
     },
-    logs: { entries: [{ level: "info", message: "hello log" }], sources: [] },
+    logs: {
+      entries: [
+        { level: "info", message: "hello log", ts: "2026-05-03T08:15:30Z" },
+        { level: "warn", message: "no timestamp here", ts: null },
+      ],
+      sources: [],
+    },
   })),
 }));
 
@@ -234,6 +240,9 @@ describe("AdminDashboard", () => {
 
     expect(await screen.findByText("Log Feed")).toBeInTheDocument();
     expect(screen.getByText("hello log")).toBeInTheDocument();
+    // Timestamped row shows a localized clock string; the entry without a ts
+    // still renders cleanly without crashing.
+    expect(screen.getByText("no timestamp here")).toBeInTheDocument();
   });
 
   it("renders the config workbench in the config tab", async () => {

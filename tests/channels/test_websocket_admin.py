@@ -569,6 +569,34 @@ async def test_admin_subagent_cancel_returns_false_when_unknown(tmp_path: Path) 
     assert json.loads(response.body) == {"cancelled": False}
 
 
+def test_admin_log_entry_surfaces_timestamp(tmp_path: Path) -> None:
+    """`_log_entry` extracts ts/time/timestamp into a top-level ``ts`` field."""
+    channel, _ = _channel(tmp_path)
+    service = channel._admin_service
+    assert service is not None
+    log_path = tmp_path / "fake.log"
+
+    entry_with_ts = service._log_entry(
+        log_path,
+        json.dumps({"ts": "2026-05-03T08:15:30Z", "level": "info", "message": "ping"}),
+    )
+    assert entry_with_ts["ts"] == "2026-05-03T08:15:30Z"
+    assert entry_with_ts["message"] == "ping"
+
+    entry_with_time_field = service._log_entry(
+        log_path,
+        json.dumps({"time": "2026-05-03T09:00:00Z", "level": "warn", "message": "x"}),
+    )
+    assert entry_with_time_field["ts"] == "2026-05-03T09:00:00Z"
+
+    entry_no_ts = service._log_entry(log_path, json.dumps({"message": "no time"}))
+    assert entry_no_ts["ts"] is None
+
+    entry_plain_text = service._log_entry(log_path, "raw line")
+    assert entry_plain_text["ts"] is None
+    assert entry_plain_text["message"] == "raw line"
+
+
 def test_admin_agents_surface_includes_live_sessions(tmp_path: Path) -> None:
     """`agents().live` reports in-flight turns and subagent statuses, with stale empty keys filtered."""
     import time as _time

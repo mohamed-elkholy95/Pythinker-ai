@@ -289,7 +289,8 @@ def test_auth_logout_no_token_file_is_noop(tmp_path):
     ):
         result = runner.invoke(app, ["auth", "logout", "openai_codex", "-y"])
     assert result.exit_code == 0
-    assert "nothing to do" in result.stdout
+    # typer/rich wraps long lines, so collapse whitespace before substring checks.
+    assert "nothing to do" in " ".join(result.stdout.split())
 
 
 def test_auth_logout_unlinks_token_file_with_yes_flag(tmp_path):

@@ -47,7 +47,8 @@ describe("admin API helpers", () => {
         headers: { Authorization: "Bearer tok" },
       }),
     );
-    expect(body.config.providers.openai.apiKey).toBe("********");
+    const providers = body.config.providers as { openai: { apiKey: string } };
+    expect(providers.openai.apiKey).toBe("********");
     expect(body.secret_paths).toContain("providers.openai.api_key");
   });
 

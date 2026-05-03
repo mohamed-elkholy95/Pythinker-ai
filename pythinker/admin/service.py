@@ -435,12 +435,40 @@ class AdminService:
                 if manifest is None:
                     continue
                 manifests.append(manifest.model_dump(mode="json", by_alias=True))
+
+        # Live runtime view: which sessions have an in-flight turn or live
+        # subagents. ``_active_tasks`` is a single-underscore attribute on
+        # AgentLoop (not name-mangled). Its done-callback (loop.py:1037)
+        # removes finished tasks from the per-key list but never deletes the
+        # key, so we must filter empty rows here.
+        sub_mgr = getattr(self.agent_loop, "subagents", None)
+        statuses = sub_mgr.list_statuses() if sub_mgr is not None else []
+        by_session: dict[str, list[dict[str, Any]]] = {}
+        for row in statuses:
+            by_session.setdefault(row.get("session_key") or "", []).append(row)
+        active = getattr(self.agent_loop, "_active_tasks", {}) or {}
+        live_sessions: list[dict[str, Any]] = []
+        for key in sorted(set(by_session) | set(active.keys())):
+            if not key:
+                continue
+            in_flight = sum(1 for t in active.get(key, []) if not t.done())
+            subs = by_session.get(key, [])
+            if in_flight == 0 and not subs:
+                continue
+            live_sessions.append({
+                "key": key,
+                "in_flight": in_flight,
+                "subagent_count": len(subs),
+                "subagents": subs,
+            })
+
         return {
             "default_agent_id": self.config.runtime.default_agent_id,
             "policy_enabled": self.config.runtime.policy_enabled,
             "manifests_dir": self.config.runtime.manifests_dir,
             "total": len(manifests),
             "agents": manifests,
+            "live": {"sessions": live_sessions},
         }
 
     def skills(self) -> dict[str, Any]:

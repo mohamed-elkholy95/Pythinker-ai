@@ -23,6 +23,8 @@ import { useTranslation } from "react-i18next";
 
 import {
   fetchAdminSurfaces,
+  type AdminLiveSession,
+  type AdminSubagentStatus,
   type AdminSurfaces,
 } from "@/lib/admin-api";
 import { adminTabMeta, type AdminTabId } from "@/lib/admin-tabs";
@@ -101,10 +103,9 @@ export function AdminDashboard({
   const { t } = useTranslation();
   const { token } = useClient();
   const [state, setState] = useState<AdminState>({ status: "loading" });
-  const [uncontrolledTab] = useState<AdminTabId>("overview");
-  const controlled = activeTabProp !== undefined;
-  const activeTab = controlled ? activeTabProp! : uncontrolledTab;
-  // Tab navigation is driven externally via the sidebar (onActiveTabChange).
+  // Tab is always controlled by the shell (sidebar). Fall back to "overview"
+  // only if a caller forgets to pass the prop.
+  const activeTab: AdminTabId = activeTabProp ?? "overview";
   void onActiveTabChange;
   const refresh = useCallback(async () => {
     try {
@@ -388,27 +389,113 @@ function CronView({ data }: { data: AdminSurfaces }) {
 }
 
 function AgentsView({ data }: { data: AdminSurfaces }) {
+  const liveSessions = data.agents.live?.sessions ?? [];
   return (
-    <Panel title="Agents" icon={<Bot className="h-4 w-4" />}>
-      <KeyValues
-        rows={[
-          ["Default", data.agents.default_agent_id],
-          ["Policy", data.agents.policy_enabled ? "enabled" : "disabled"],
-          ["Manifests", data.agents.manifests_dir ?? "not configured"],
-          ["Total", formatNumber(data.agents.total)],
-        ]}
-      />
-      <div className="mt-4">
-        <Table
-          columns={["Agent", "ID", "Lifecycle", "Model"]}
-          rows={data.agents.agents.map((agent) => [
-            stringify(agent.name),
-            stringify(agent.id),
-            stringify(agent.lifecycle),
-            stringify(agent.model),
-          ])}
+    <div className="space-y-4">
+      <Panel title="Agents" icon={<Bot className="h-4 w-4" />}>
+        <KeyValues
+          rows={[
+            ["Default", data.agents.default_agent_id],
+            ["Policy", data.agents.policy_enabled ? "enabled" : "disabled"],
+            ["Manifests", data.agents.manifests_dir ?? "not configured"],
+            ["Total", formatNumber(data.agents.total)],
+          ]}
         />
-      </div>
+        <div className="mt-4">
+          <Table
+            columns={["Agent", "ID", "Lifecycle", "Model"]}
+            rows={data.agents.agents.map((agent) => [
+              stringify(agent.name),
+              stringify(agent.id),
+              stringify(agent.lifecycle),
+              stringify(agent.model),
+            ])}
+          />
+        </div>
+      </Panel>
+      <LiveAgentsPanel sessions={liveSessions} />
+    </div>
+  );
+}
+
+function formatElapsed(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${m}m ${String(rem).padStart(2, "0")}s`;
+}
+
+function formatStartedIso(iso?: string): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleTimeString();
+}
+
+function summarizePhases(rows: AdminSubagentStatus[]): string {
+  if (rows.length === 0) return "—";
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    counts.set(r.phase, (counts.get(r.phase) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([phase, n]) => `${n} ${phase}`)
+    .join(", ");
+}
+
+function LiveAgentsPanel({ sessions }: { sessions: AdminLiveSession[] }) {
+  return (
+    <Panel title="Live agents" icon={<Activity className="h-4 w-4" />}>
+      {sessions.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No active agents.</p>
+      ) : (
+        <div className="space-y-3">
+          {sessions.map((session) => (
+            <div
+              key={session.key}
+              className="rounded-lg border border-border/60 bg-background/55 p-3"
+            >
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="truncate font-mono text-sm font-semibold">
+                    {session.key}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {session.in_flight} in flight · {session.subagent_count} subagent
+                    {session.subagent_count === 1 ? "" : "s"} ·{" "}
+                    {summarizePhases(session.subagents)}
+                  </div>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Latest:{" "}
+                  {formatStartedIso(
+                    session.subagents
+                      .map((s) => s.started_at_iso)
+                      .filter(Boolean)
+                      .sort()
+                      .at(-1) ?? undefined,
+                  )}
+                </div>
+              </div>
+              {session.subagents.length > 0 && (
+                <div className="mt-2">
+                  <Table
+                    columns={["Label", "Phase", "Iter.", "Elapsed", "Last tool"]}
+                    rows={session.subagents.map((sub) => [
+                      sub.label,
+                      sub.phase,
+                      String(sub.iteration),
+                      formatElapsed(sub.elapsed_s),
+                      stringify(sub.tool_events.at(-1)?.name) || "—",
+                    ])}
+                  />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </Panel>
   );
 }
@@ -539,7 +626,7 @@ function KeyValues({ rows }: { rows: Array<[string, string]> }) {
   );
 }
 
-function Table({ columns, rows }: { columns: string[]; rows: string[][] }) {
+function Table({ columns, rows }: { columns: string[]; rows: ReactNode[][] }) {
   return (
     <div className="overflow-auto rounded-lg border border-border/60">
       <table className="min-w-full text-left text-xs">

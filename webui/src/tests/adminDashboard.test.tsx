@@ -114,6 +114,31 @@ vi.mock("@/lib/admin-api", () => ({
       manifests_dir: null,
       total: 0,
       agents: [],
+      live: {
+        sessions: [
+          {
+            key: "websocket:browser",
+            in_flight: 1,
+            subagent_count: 1,
+            subagents: [
+              {
+                task_id: "abc12345",
+                label: "research-X",
+                task_description: "look up X",
+                started_at_iso: "2026-05-03T00:00:00+00:00",
+                elapsed_s: 12,
+                phase: "awaiting_tools",
+                iteration: 2,
+                tool_events: [{ name: "read_file", status: "ok" }],
+                usage: {},
+                stop_reason: null,
+                error: null,
+                session_key: "websocket:browser",
+              },
+            ],
+          },
+        ],
+      },
     },
     skills: {
       total: 1,
@@ -210,6 +235,28 @@ describe("AdminDashboard", () => {
     expect(await screen.findByText("Config Workbench")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /agents/i }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: /providers/i }).length).toBeGreaterThan(0);
+  });
+
+  it("renders the Live agents panel inside the agents tab", async () => {
+    renderDashboard("agents");
+
+    expect(await screen.findByText("Live agents")).toBeInTheDocument();
+    expect(screen.getByText("websocket:browser")).toBeInTheDocument();
+    expect(screen.getByText("research-X")).toBeInTheDocument();
+    expect(screen.getByText("awaiting_tools")).toBeInTheDocument();
+    expect(screen.getByText("read_file")).toBeInTheDocument();
+  });
+
+  it("shows an empty state when no live sessions are reported", async () => {
+    const { fetchAdminSurfaces } = await import("@/lib/admin-api");
+    const mocked = vi.mocked(fetchAdminSurfaces);
+    const base = await mocked("tok");
+    mocked.mockResolvedValueOnce({
+      ...base,
+      agents: { ...base.agents, live: { sessions: [] } },
+    });
+    renderDashboard("agents");
+    expect(await screen.findByText("No active agents.")).toBeInTheDocument();
   });
 
   it("renders infrastructure as a structured key-value panel, not raw JSON", async () => {

@@ -122,6 +122,29 @@ export interface AdminProviderSurfaceRow {
   active: boolean;
 }
 
+export interface AdminSubagentStatus {
+  task_id: string;
+  label: string;
+  task_description: string;
+  started_at_wall?: number;
+  started_at_iso?: string;
+  elapsed_s: number;
+  phase: string;
+  iteration: number;
+  tool_events: Array<Record<string, unknown> & { name?: string; status?: string; detail?: string }>;
+  usage: Record<string, number>;
+  stop_reason?: string | null;
+  error?: string | null;
+  session_key?: string;
+}
+
+export interface AdminLiveSession {
+  key: string;
+  in_flight: number;
+  subagent_count: number;
+  subagents: AdminSubagentStatus[];
+}
+
 export interface AdminProviderRoutingSurface {
   model: string;
   matched_spec: string | null;
@@ -147,6 +170,7 @@ export interface AdminSurfaces {
     total: number;
     agents: Array<Record<string, unknown> & { id?: string; name?: string }>;
     routing?: AdminProviderRoutingSurface;
+    live?: { sessions: AdminLiveSession[] };
   };
   providers?: { rows: AdminProviderSurfaceRow[] };
   tools?: Record<string, unknown>;

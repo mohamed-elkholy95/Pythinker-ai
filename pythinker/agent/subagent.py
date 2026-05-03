@@ -4,7 +4,8 @@ import asyncio
 import json
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -36,7 +37,9 @@ class SubagentStatus:
     task_id: str
     label: str
     task_description: str
-    started_at: float          # time.monotonic()
+    started_at: float          # time.monotonic() — for elapsed_s only
+    started_at_wall: float = 0.0  # time.time() at spawn — for absolute UI display
+    started_at_iso: str = ""      # ISO-8601 of started_at_wall
     phase: str = "initializing"  # initializing | awaiting_tools | tools_completed | final_response | done | error
     iteration: int = 0
     tool_events: list = field(default_factory=list)   # [{name, status, detail}, ...]
@@ -157,11 +160,14 @@ class SubagentManager:
             "sender_id": parent_sender_id,
         }
 
+        wall_now = time.time()
         status = SubagentStatus(
             task_id=task_id,
             label=display_label,
             task_description=task,
             started_at=time.monotonic(),
+            started_at_wall=wall_now,
+            started_at_iso=datetime.fromtimestamp(wall_now, tz=timezone.utc).isoformat(),
         )
         self._task_statuses[task_id] = status
 
@@ -397,3 +403,26 @@ class SubagentManager:
             1 for tid in tids
             if tid in self._running_tasks and not self._running_tasks[tid].done()
         )
+
+    def list_statuses(self) -> list[dict[str, Any]]:
+        """JSON-safe snapshot of all live subagent statuses.
+
+        Each row carries ``elapsed_s`` (computed from the monotonic clock) and
+        ``session_key`` (resolved from ``_session_tasks``). The internal
+        monotonic ``started_at`` is dropped — callers should display
+        ``started_at_iso``.
+        """
+        task_to_session: dict[str, str] = {}
+        for skey, tids in self._session_tasks.items():
+            for tid in tids:
+                task_to_session[tid] = skey
+
+        now = time.monotonic()
+        rows: list[dict[str, Any]] = []
+        for tid, status in self._task_statuses.items():
+            row = asdict(status)
+            row.pop("started_at", None)
+            row["elapsed_s"] = max(0.0, now - status.started_at)
+            row["session_key"] = task_to_session.get(tid, "")
+            rows.append(row)
+        return rows

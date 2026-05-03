@@ -448,6 +448,60 @@ async def test_admin_mcp_probe_rpc_redacts_configured_server(tmp_path: Path) -> 
     )
 
 
+def test_admin_agents_surface_includes_live_sessions(tmp_path: Path) -> None:
+    """`agents().live` reports in-flight turns and subagent statuses, with stale empty keys filtered."""
+    import time as _time
+
+    from pythinker.agent.subagent import SubagentStatus
+
+    channel, _ = _channel(tmp_path)
+    service = channel._admin_service
+    assert service is not None
+
+    # Stub a subagent manager + active-task map on the loop.
+    sub_mgr = MagicMock()
+    sub_mgr.list_statuses.return_value = [
+        {
+            "task_id": "abc",
+            "label": "research",
+            "task_description": "look up X",
+            "started_at_iso": "2026-05-03T00:00:00+00:00",
+            "elapsed_s": 12.5,
+            "phase": "awaiting_tools",
+            "iteration": 1,
+            "tool_events": [],
+            "usage": {},
+            "stop_reason": None,
+            "error": None,
+            "session_key": "websocket:browser",
+        },
+    ]
+    service.agent_loop.subagents = sub_mgr
+
+    not_done = MagicMock()
+    not_done.done.return_value = False
+    done = MagicMock()
+    done.done.return_value = True
+    service.agent_loop._active_tasks = {
+        "websocket:browser": [not_done],
+        "stale:empty": [],            # stale empty key — must be filtered
+        "stale:done": [done],         # done-only — must be filtered
+        "": [not_done],               # empty key — must be skipped
+    }
+
+    out = service.agents()
+    sessions = out["live"]["sessions"]
+    keys = {s["key"] for s in sessions}
+    assert keys == {"websocket:browser"}
+    row = next(s for s in sessions if s["key"] == "websocket:browser")
+    assert row["in_flight"] == 1
+    assert row["subagent_count"] == 1
+    assert row["subagents"][0]["task_id"] == "abc"
+    # The status dataclass shape we plug in mirrors what list_statuses produces:
+    _ = SubagentStatus  # ensure import path stays live
+    _ = _time  # silence unused import for ruff
+
+
 async def test_admin_browser_probe_rpc_redacts_runtime_state(tmp_path: Path) -> None:
     channel, _ = _channel(tmp_path)
     service = channel._admin_service

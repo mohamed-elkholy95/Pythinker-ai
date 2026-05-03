@@ -786,3 +786,13 @@ class LLMProvider(ABC):
     def get_default_model(self) -> str:
         """Get the default model for this provider."""
         pass
+
+    @staticmethod
+    def get_model_limits(model: str) -> dict[str, int] | None:
+        """Return server-side context limits for `model`, or None if unknown.
+
+        Keys: ``context`` (total), ``input``, ``output`` (all in tokens).
+        Subclasses override for plans that publish hard caps; the AgentLoop
+        clamps configured context-window settings to the ``input`` value.
+        """
+        return None

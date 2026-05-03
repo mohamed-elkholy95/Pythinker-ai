@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -23,6 +24,30 @@ from pythinker.providers.openai_responses import (
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_ORIGINATOR = "pythinker"
 
+# Models with explicit support under the ChatGPT/Codex OAuth plan.
+# Mirrors opencode's allow-list at packages/opencode/src/plugin/codex.ts.
+# Any other gpt-X.Y with major.minor > 5.4 is also accepted (forward-compat).
+_CODEX_ALLOWED_MODELS = frozenset({
+    "gpt-5.1-codex",
+    "gpt-5.1-codex-max",
+    "gpt-5.1-codex-mini",
+    "gpt-5.2",
+    "gpt-5.2-codex",
+    "gpt-5.3-codex",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+})
+
+# Context-window caps imposed server-side by the Codex OAuth plan.
+# gpt-5.5 is currently restricted; other models inherit OpenAI defaults.
+_CODEX_GPT_5_5_LIMITS = {
+    "context": 400_000,
+    "input": 272_000,
+    "output": 128_000,
+}
+
+_GPT_VERSION_RE = re.compile(r"^gpt-(\d+\.\d+)")
+
 
 class OpenAICodexProvider(LLMProvider):
     """Use Codex OAuth to call the Responses API."""
@@ -32,6 +57,30 @@ class OpenAICodexProvider(LLMProvider):
     def __init__(self, default_model: str = "openai-codex/gpt-5.5"):
         super().__init__(api_key=None, api_base=None)
         self.default_model = default_model
+
+    @staticmethod
+    def is_supported_model(model: str) -> bool:
+        """Return True if `model` is acceptable for the Codex OAuth backend."""
+        api_id = _strip_model_prefix(model).lower()
+        if "codex" in api_id:
+            return True
+        if api_id in _CODEX_ALLOWED_MODELS:
+            return True
+        m = _GPT_VERSION_RE.match(api_id)
+        if m:
+            try:
+                return float(m.group(1)) > 5.4
+            except ValueError:
+                return False
+        return False
+
+    @staticmethod
+    def get_model_limits(model: str) -> dict[str, int] | None:
+        """Return server-side context limits, or None if unknown."""
+        api_id = _strip_model_prefix(model).lower()
+        if "gpt-5.5" in api_id:
+            return dict(_CODEX_GPT_5_5_LIMITS)
+        return None
 
     async def _call_codex(
         self,
@@ -44,6 +93,12 @@ class OpenAICodexProvider(LLMProvider):
     ) -> LLMResponse:
         """Shared request logic for both chat() and chat_stream()."""
         model = model or self.default_model
+        if not self.is_supported_model(model):
+            logger.warning(
+                "Codex OAuth model {!r} is not in the allow-list; the ChatGPT "
+                "backend will likely reject the request.",
+                model,
+            )
         system_prompt, input_items = convert_messages(messages)
 
         token = await asyncio.to_thread(_locked_get_codex_token)

@@ -338,7 +338,10 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         ),
         signup_url="https://platform.moonshot.ai/console/api-keys",
     ),
-    # MiniMax: OpenAI-compatible API
+    # MiniMax: OpenAI-compatible API.
+    # M2.x sampling defaults follow opencode's transform.ts: temperature=1.0,
+    # top_p=0.95. Without these MiniMax M2 occasionally produces low-quality
+    # output on default temperature=0.7.
     ProviderSpec(
         name="minimax",
         keywords=("minimax",),
@@ -348,6 +351,9 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://api.minimax.io/v1",
         signup_url="https://platform.minimax.io/user-center/payment/token-plan",
         docs_url="https://platform.minimax.io/docs/token-plan/other-tools",
+        model_overrides=(
+            ("minimax-m2", {"temperature": 1.0, "top_p": 0.95}),
+        ),
         auth_methods=[
             AuthMethod(
                 id="api-key-cn",

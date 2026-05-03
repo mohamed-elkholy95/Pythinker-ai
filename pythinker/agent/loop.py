@@ -175,6 +175,31 @@ class _LoopHook(AgentHook):
         return self._loop._strip_think(content)
 
 
+def _clamp_context_window(
+    provider: LLMProvider, model: str, configured: int
+) -> int:
+    """Clamp ``configured`` to the provider's published input cap.
+
+    Some plans publish hard limits the server enforces (e.g. ChatGPT/Codex
+    OAuth caps gpt-5.5 input at 272k tokens). Without this, configured
+    windows exceeding the cap drive silent server-side overflow after
+    compaction has already trusted the larger budget.
+    """
+    limits = provider.get_model_limits(model)
+    if not isinstance(limits, dict):
+        return configured
+    input_cap = limits.get("input")
+    if not isinstance(input_cap, int) or input_cap <= 0:
+        return configured
+    if configured > input_cap:
+        logger.info(
+            "Clamping context_window_tokens {} → {} for model {} (provider cap)",
+            configured, input_cap, model,
+        )
+        return input_cap
+    return configured
+
+
 class AgentLoop:
     """
     The agent loop is the core processing engine.
@@ -259,10 +284,14 @@ class AgentLoop:
         self.max_iterations = (
             max_iterations if max_iterations is not None else defaults.max_tool_iterations
         )
-        self.context_window_tokens = (
-            context_window_tokens
-            if context_window_tokens is not None
-            else defaults.context_window_tokens
+        self.context_window_tokens = _clamp_context_window(
+            self.provider,
+            self.model,
+            (
+                context_window_tokens
+                if context_window_tokens is not None
+                else defaults.context_window_tokens
+            ),
         )
         self.context_block_limit = context_block_limit
         self.max_tool_result_chars = (
@@ -398,7 +427,9 @@ class AgentLoop:
         """
         provider = snapshot.provider
         model = snapshot.model
-        context_window_tokens = snapshot.context_window_tokens
+        context_window_tokens = _clamp_context_window(
+            provider, model, snapshot.context_window_tokens
+        )
         if self.provider is provider and self.model == model:
             return
         old_model = self.model

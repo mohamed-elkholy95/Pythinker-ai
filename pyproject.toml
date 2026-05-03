@@ -7,7 +7,6 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
     { name = "Mohamed Elkholy", email = "moelkholy1995@gmail.com" },
-    { name = "Pythinker contributors" },
 ]
 maintainers = [
     { name = "Mohamed Elkholy", email = "moelkholy1995@gmail.com" },
@@ -132,7 +131,7 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/mohamed-elkholy95/Pythinker-ai"
+Homepage = "https://pythinker.com"
 Repository = "https://github.com/mohamed-elkholy95/Pythinker-ai"
 Documentation = "https://github.com/mohamed-elkholy95/Pythinker-ai/tree/main/docs"
 Issues = "https://github.com/mohamed-elkholy95/Pythinker-ai/issues"

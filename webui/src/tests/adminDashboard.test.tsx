@@ -1,8 +1,7 @@
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AdminDashboard } from "@/components/admin/AdminDashboard";
+import { AdminDashboard, type AdminTabId } from "@/components/admin/AdminDashboard";
 import { ClientProvider } from "@/providers/ClientProvider";
 
 vi.mock("@/lib/admin-api", () => ({
@@ -153,7 +152,7 @@ vi.mock("@/lib/admin-api", () => ({
   })),
 }));
 
-function renderDashboard() {
+function renderDashboard(tab: AdminTabId = "overview") {
   const client = {
     setAdminConfig: vi.fn(async () => ({
       path: "logging.level",
@@ -162,17 +161,17 @@ function renderDashboard() {
     unsetAdminConfig: vi.fn(),
     replaceAdminSecret: vi.fn(),
   };
-  render(
+  const result = render(
     <ClientProvider
       client={client as never}
       token="tok"
       modelName="openai/gpt-4o"
       voiceEnabled={false}
     >
-      <AdminDashboard />
+      <AdminDashboard activeTab={tab} />
     </ClientProvider>,
   );
-  return client;
+  return { client, ...result };
 }
 
 beforeEach(() => {
@@ -180,44 +179,44 @@ beforeEach(() => {
 });
 
 describe("AdminDashboard", () => {
-  it("renders runtime, sessions, models, usage, and redacted config panels", async () => {
-    renderDashboard();
+  it("renders the overview header and overview content panels", async () => {
+    renderDashboard("overview");
 
-    expect(await screen.findByLabelText("Admin breadcrumb")).toHaveTextContent(
-      "Overview",
-    );
+    expect(await screen.findByText("Overview")).toBeInTheDocument();
+    expect(screen.getByText("Monitor")).toBeInTheDocument();
     expect(screen.getByText("/tmp/workspace")).toBeInTheDocument();
     expect(screen.getByText("slack:C123")).toBeInTheDocument();
     expect(screen.getAllByText("openai/gpt-4o").length).toBeGreaterThan(0);
     expect(screen.getByText("providers.openai.api_key")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Channels" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Agents" })).toBeInTheDocument();
   });
 
-  it("switches between control-console tabs", async () => {
-    renderDashboard();
-    const user = userEvent.setup();
+  it("renders the channels surface when the channels tab is active", async () => {
+    renderDashboard("channels");
 
-    await user.click(await screen.findByRole("button", { name: "Channels" }));
-    expect(screen.getByLabelText("Admin breadcrumb")).toHaveTextContent(
-      "Channels",
-    );
-    expect(screen.getByText("Channel Health")).toBeInTheDocument();
+    expect(await screen.findByText("Channel Health")).toBeInTheDocument();
     expect(screen.getByText("websocket")).toBeInTheDocument();
+  });
 
-    await user.click(screen.getByRole("button", { name: "Logs" }));
-    expect(screen.getByLabelText("Admin breadcrumb")).toHaveTextContent("Logs");
-    expect(screen.getByText("Log Feed")).toBeInTheDocument();
+  it("renders the logs surface when the logs tab is active", async () => {
+    renderDashboard("logs");
+
+    expect(await screen.findByText("Log Feed")).toBeInTheDocument();
     expect(screen.getByText("hello log")).toBeInTheDocument();
   });
 
   it("renders the config workbench in the config tab", async () => {
-    renderDashboard();
-    const user = userEvent.setup();
+    renderDashboard("config");
 
-    await user.click(await screen.findByRole("button", { name: "Config" }));
     expect(await screen.findByText("Config Workbench")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /agents/i }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: /providers/i }).length).toBeGreaterThan(0);
+  });
+
+  it("renders infrastructure as a structured key-value panel, not raw JSON", async () => {
+    renderDashboard("infrastructure");
+
+    expect(await screen.findByText("Infrastructure")).toBeInTheDocument();
+    expect(screen.getByText("gateway.host")).toBeInTheDocument();
+    expect(screen.getAllByText("127.0.0.1").length).toBeGreaterThan(0);
   });
 });

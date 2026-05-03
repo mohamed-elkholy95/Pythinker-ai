@@ -44,31 +44,31 @@ const TAB_GROUPS: Array<{
   tabs: Array<{ id: AdminTabId; label: string; icon: ReactNode }>;
 }> = [
   {
-    label: "Control",
+    label: "Monitor",
     tabs: [
       { id: "overview", label: "Overview", icon: <LayoutDashboard className="h-3.5 w-3.5" /> },
+      { id: "usage", label: "Usage", icon: <Gauge className="h-3.5 w-3.5" /> },
+      { id: "logs", label: "Logs", icon: <ScrollText className="h-3.5 w-3.5" /> },
+    ],
+  },
+  {
+    label: "Workspace",
+    tabs: [
       { id: "channels", label: "Channels", icon: <Globe2 className="h-3.5 w-3.5" /> },
       { id: "sessions", label: "Sessions", icon: <Database className="h-3.5 w-3.5" /> },
-      { id: "usage", label: "Usage", icon: <Gauge className="h-3.5 w-3.5" /> },
+      { id: "agents", label: "Agents", icon: <Bot className="h-3.5 w-3.5" /> },
+      { id: "skills", label: "Skills", icon: <Zap className="h-3.5 w-3.5" /> },
+      { id: "dreams", label: "Dreams", icon: <Moon className="h-3.5 w-3.5" /> },
       { id: "cron", label: "Cron", icon: <CalendarClock className="h-3.5 w-3.5" /> },
     ],
   },
   {
-    label: "Agent",
-    tabs: [
-      { id: "agents", label: "Agents", icon: <Bot className="h-3.5 w-3.5" /> },
-      { id: "skills", label: "Skills", icon: <Zap className="h-3.5 w-3.5" /> },
-      { id: "dreams", label: "Dreams", icon: <Moon className="h-3.5 w-3.5" /> },
-    ],
-  },
-  {
-    label: "Settings",
+    label: "System",
     tabs: [
       { id: "config", label: "Config", icon: <Settings className="h-3.5 w-3.5" /> },
       { id: "appearance", label: "Appearance", icon: <Palette className="h-3.5 w-3.5" /> },
       { id: "infrastructure", label: "Infrastructure", icon: <Activity className="h-3.5 w-3.5" /> },
       { id: "debug", label: "Debug", icon: <Bug className="h-3.5 w-3.5" /> },
-      { id: "logs", label: "Logs", icon: <ScrollText className="h-3.5 w-3.5" /> },
     ],
   },
 ];
@@ -101,20 +101,11 @@ export function AdminDashboard({
   const { t } = useTranslation();
   const { token } = useClient();
   const [state, setState] = useState<AdminState>({ status: "loading" });
-  const [uncontrolledTab, setUncontrolledTab] = useState<AdminTabId>("overview");
+  const [uncontrolledTab] = useState<AdminTabId>("overview");
   const controlled = activeTabProp !== undefined;
   const activeTab = controlled ? activeTabProp! : uncontrolledTab;
-  const setActiveTab = useCallback(
-    (tab: AdminTabId) => {
-      if (controlled) {
-        onActiveTabChange?.(tab);
-      } else {
-        setUncontrolledTab(tab);
-        onActiveTabChange?.(tab);
-      }
-    },
-    [controlled, onActiveTabChange],
-  );
+  // Tab navigation is driven externally via the sidebar (onActiveTabChange).
+  void onActiveTabChange;
   const refresh = useCallback(async () => {
     try {
       const surfaces = await fetchAdminSurfaces(token);
@@ -128,10 +119,14 @@ export function AdminDashboard({
     void refresh();
   }, [refresh]);
 
+  const activeMeta = adminTabMeta(activeTab);
+  const activeIcon = TAB_GROUPS.flatMap((g) => g.tabs).find((t) => t.id === activeTab)?.icon;
   return (
     <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background/40">
-      <AdminShellHeader
-        activeTab={activeTab}
+      <AdminHeader
+        groupLabel={activeMeta.group}
+        title={activeMeta.label}
+        icon={activeIcon}
         onRefresh={() => void refresh()}
         onToggleSidebar={onToggleSidebar}
         hideSidebarToggleOnDesktop={hideSidebarToggleOnDesktop}
@@ -148,17 +143,14 @@ export function AdminDashboard({
               {state.message}
             </div>
           ) : (
-            <div className="min-w-0 space-y-5">
-              <ControlNav activeTab={activeTab} onSelect={setActiveTab} />
-              <main className="min-w-0">
-                <TabContent
-                  tab={activeTab}
-                  data={state.surfaces}
-                  token={token}
-                  onRefresh={refresh}
-                />
-              </main>
-            </div>
+            <main className="min-w-0">
+              <TabContent
+                tab={activeTab}
+                data={state.surfaces}
+                token={token}
+                onRefresh={refresh}
+              />
+            </main>
           )}
         </div>
       </div>
@@ -166,23 +158,26 @@ export function AdminDashboard({
   );
 }
 
-function AdminShellHeader({
-  activeTab,
+function AdminHeader({
+  groupLabel,
+  title,
+  icon,
   onRefresh,
   onToggleSidebar,
   hideSidebarToggleOnDesktop,
   toggleSidebarLabel,
 }: {
-  activeTab: AdminTabId;
+  groupLabel: string;
+  title: string;
+  icon?: ReactNode;
   onRefresh: () => void;
   onToggleSidebar?: () => void;
   hideSidebarToggleOnDesktop: boolean;
   toggleSidebarLabel: string;
 }) {
-  const meta = adminTabMeta(activeTab);
   return (
-    <div className="control-topbar relative z-10 flex min-h-[58px] items-center justify-between gap-3 px-4 py-2">
-      <div className="relative flex min-w-0 items-center gap-2">
+    <header className="control-topbar relative z-10 flex min-h-[58px] items-center justify-between gap-3 px-4 py-2">
+      <div className="flex min-w-0 items-center gap-3">
         {onToggleSidebar ? (
           <Button
             variant="ghost"
@@ -190,86 +185,35 @@ function AdminShellHeader({
             aria-label={toggleSidebarLabel}
             onClick={onToggleSidebar}
             className={cn(
-              "h-9 w-9 rounded-full border border-border/70 bg-card/65 text-muted-foreground shadow-sm hover:bg-accent/50 hover:text-foreground",
-              hideSidebarToggleOnDesktop && "lg:pointer-events-none lg:opacity-0",
+              "h-9 w-9 shrink-0 rounded-full border border-border/70 bg-card/65 text-muted-foreground shadow-sm hover:bg-accent/50 hover:text-foreground",
+              hideSidebarToggleOnDesktop && "lg:hidden",
             )}
           >
             <PanelLeftOpen className="h-3.5 w-3.5" />
           </Button>
         ) : null}
-        <nav
-          aria-label="Admin breadcrumb"
-          className="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1 text-[12px] font-medium text-muted-foreground"
-        >
-          <img
-            src="/brand/icon.svg"
-            alt=""
-            className="h-4 w-4 shrink-0 rounded-[5px] opacity-85"
-            aria-hidden
-          />
-          <span className="flex min-w-0 items-center gap-1.5 truncate">
-            <span className="text-muted-foreground">Admin</span>
-            <span className="text-muted-foreground/60">/</span>
-            <span className="text-muted-foreground">{meta.group}</span>
-            <span className="text-muted-foreground/60">/</span>
-            <span className="truncate text-primary">{meta.label}</span>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            {groupLabel}
           </span>
-        </nav>
+          <span className="text-muted-foreground/60">/</span>
+          <div className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-foreground">
+            {icon}
+            <span className="truncate">{title}</span>
+          </div>
+        </div>
       </div>
-
-      <Button type="button" onClick={onRefresh} variant="outline" size="sm" className="gap-2">
+      <Button
+        type="button"
+        onClick={onRefresh}
+        variant="outline"
+        size="sm"
+        className="shrink-0 gap-2"
+      >
         <RefreshCcw className="h-4 w-4" />
         Refresh
       </Button>
-    </div>
-  );
-}
-
-function ControlNav({
-  activeTab,
-  onSelect,
-}: {
-  activeTab: AdminTabId;
-  onSelect: (tab: AdminTabId) => void;
-}) {
-  const activeGroup = TAB_GROUPS.find((group) => group.tabs.some((tab) => tab.id === activeTab))?.label ?? "Control";
-
-  return (
-    <nav className="control-glass rounded-2xl p-3" aria-label="Admin console sections">
-      <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
-        <span className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-          Console
-        </span>
-        <span className="rounded-full border border-border/60 bg-background/60 px-2 py-0.5 text-[10px] text-muted-foreground">
-          {activeGroup}
-        </span>
-      </div>
-      <div className="flex gap-3 overflow-x-auto pb-1 scrollbar-thin">
-        {TAB_GROUPS.map((group) => (
-          <div key={group.label} className="flex shrink-0 items-center gap-1 rounded-xl border border-border/60 bg-background/45 p-1">
-            <span className="px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-              {group.label}
-            </span>
-            {group.tabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => onSelect(tab.id)}
-                className={cn(
-                  "flex h-8 shrink-0 items-center gap-2 rounded-lg px-2.5 text-left text-xs transition-all",
-                  "text-muted-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
-                  activeTab === tab.id
-                    && "bg-primary/[0.12] text-sidebar-foreground shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.28)]",
-                )}
-              >
-                {tab.icon}
-                <span className="truncate">{tab.label}</span>
-              </button>
-            ))}
-          </div>
-        ))}
-      </div>
-    </nav>
+    </header>
   );
 }
 
@@ -308,11 +252,19 @@ function TabContent({
         />
       );
     case "appearance":
-      return <ObjectView title="Appearance" icon={<Palette className="h-4 w-4" />} value={data.appearance} />;
+      return (
+        <Panel title="Appearance" icon={<Palette className="h-4 w-4" />}>
+          <KeyValues rows={flattenRecord(data.appearance)} />
+        </Panel>
+      );
     case "infrastructure":
       return <InfrastructureView data={data} />;
     case "debug":
-      return <ObjectView title="Debug" icon={<Bug className="h-4 w-4" />} value={data.debug} />;
+      return (
+        <Panel title="Debug" icon={<Bug className="h-4 w-4" />}>
+          <KeyValues rows={flattenRecord(data.debug)} />
+        </Panel>
+      );
     case "logs":
       return <LogsView data={data} />;
     case "overview":
@@ -479,7 +431,9 @@ function SkillsView({ data }: { data: AdminSurfaces }) {
 
 function DreamsView({ data }: { data: AdminSurfaces }) {
   return (
-    <ObjectView title="Dreams" icon={<Sparkles className="h-4 w-4" />} value={data.dreams} />
+    <Panel title="Dreams" icon={<Sparkles className="h-4 w-4" />}>
+      <KeyValues rows={flattenRecord(data.dreams)} />
+    </Panel>
   );
 }
 
@@ -497,12 +451,27 @@ function ConfigView({
 
 function InfrastructureView({ data }: { data: AdminSurfaces }) {
   return (
-    <ObjectView
-      title="Infrastructure"
-      icon={<Activity className="h-4 w-4" />}
-      value={data.infrastructure}
-    />
+    <Panel title="Infrastructure" icon={<Activity className="h-4 w-4" />}>
+      <KeyValues rows={flattenRecord(data.infrastructure)} />
+    </Panel>
   );
+}
+
+function flattenRecord(value: Record<string, unknown>, prefix = ""): Array<[string, string]> {
+  const rows: Array<[string, string]> = [];
+  for (const [key, raw] of Object.entries(value)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (raw === null || raw === undefined) {
+      rows.push([path, "—"]);
+    } else if (Array.isArray(raw)) {
+      rows.push([path, raw.length === 0 ? "[]" : JSON.stringify(raw)]);
+    } else if (typeof raw === "object") {
+      rows.push(...flattenRecord(raw as Record<string, unknown>, path));
+    } else {
+      rows.push([path, stringify(raw)]);
+    }
+  }
+  return rows;
 }
 
 function LogsView({ data }: { data: AdminSurfaces }) {
@@ -524,24 +493,6 @@ function LogsView({ data }: { data: AdminSurfaces }) {
           ))
         )}
       </div>
-    </Panel>
-  );
-}
-
-function ObjectView({
-  title,
-  icon,
-  value,
-}: {
-  title: string;
-  icon: ReactNode;
-  value: unknown;
-}) {
-  return (
-    <Panel title={title} icon={icon}>
-      <pre className="max-h-[36rem] overflow-auto rounded-xl border border-border/60 bg-background/65 p-4 text-xs leading-5">
-        {JSON.stringify(value, null, 2)}
-      </pre>
     </Panel>
   );
 }

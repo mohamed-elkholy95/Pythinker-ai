@@ -123,6 +123,31 @@ describe("usePythinkerStream", () => {
     expect(result.current.isStreaming).toBe(false);
   });
 
+  it("drops the placeholder when stream_end leaves only <think> content", () => {
+    // Reasoning models stream chain-of-thought as raw deltas; finalText is
+    // non-empty but post-extractThink visible is. Without this gate, every
+    // tool pivot leaves a bare "Reasoning" pill stacked in the thread.
+    const fake = fakeClient();
+    const { result } = renderHook(() => usePythinkerStream("chat-t", []), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-t", {
+        event: "delta",
+        chat_id: "chat-t",
+        text: "<think>I should call the browser tool here.</think>",
+      });
+      fake.emit("chat-t", {
+        event: "stream_end",
+        chat_id: "chat-t",
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(0);
+    expect(result.current.isStreaming).toBe(false);
+  });
+
   it("finalizes the placeholder when stream_end arrives with answer text", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => usePythinkerStream("chat-t", []), {

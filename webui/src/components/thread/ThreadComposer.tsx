@@ -337,7 +337,7 @@ export function ThreadComposer({
           "relative mx-auto flex w-full flex-col overflow-hidden transition-all duration-200",
           isHero
             ? "max-w-[40rem] rounded-[24px] border border-border/75 bg-card/72 shadow-[0_10px_30px_rgba(0,0,0,0.10)]"
-            : "max-w-[49.5rem] rounded-[16px] border border-border/70 bg-card/55",
+            : "rounded-[16px] border border-border/70 bg-card/55",
           "focus-within:bg-card/70 focus-within:ring-1 focus-within:ring-foreground/8",
           disabled && "opacity-60",
         )}

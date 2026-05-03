@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
+import { extractThinkBlocks } from "@/lib/extractThinkBlocks";
 import type { StreamError } from "@/lib/pythinker-client";
 import type {
   InboundEvent,
@@ -217,14 +218,16 @@ export function usePythinkerStream(
         // firing against an id that no longer exists in the messages list.
         stopLatency(finalId);
         setIsStreaming(false);
-        // Reasoning + tool-call assistant turns produce a stream that ends
-        // with no visible answer text (the model emitted only ``<think>...``
-        // followed by tool calls, and the next turn streams as a new bubble).
-        // Finalizing the placeholder in that case leaves a blank assistant
-        // row in the thread for every tool pivot. Drop the placeholder
-        // entirely so only turns that actually produced visible answer text
-        // become persistent bubbles.
-        if (finalText.length === 0) {
+        // Reasoning + tool-call assistant turns stream raw ``<think>...
+        // </think>`` content followed by a tool call. ``finalText`` is
+        // non-empty (the think block IS on the wire as deltas), but after
+        // stripping reasoning, the visible answer is empty. Finalizing
+        // the placeholder leaves a bare "Reasoning" pill in the thread
+        // for every tool pivot. Drop the placeholder entirely when the
+        // post-extractThink visible text is empty; reasoning is only
+        // worth keeping when paired with a real answer.
+        const visible = extractThinkBlocks(finalText).visible.trim();
+        if (visible.length === 0) {
           setMessages((prev) => prev.filter((m) => m.id !== finalId));
           return;
         }
@@ -277,6 +280,17 @@ export function usePythinkerStream(
         cancelFlush();
         buffer.current = null;
         setIsStreaming(false);
+        // Tool-pivot turns can also arrive as full ``message`` frames rather
+        // than streamed deltas. Skip if there's no visible answer text after
+        // stripping reasoning — otherwise the thread accumulates a bare
+        // "Reasoning" pill for every tool call.
+        const messageVisible = extractThinkBlocks(ev.text).visible.trim();
+        if (messageVisible.length === 0) {
+          if (activeId) {
+            setMessages((prev) => prev.filter((m) => m.id !== activeId));
+          }
+          return;
+        }
         setMessages((prev) => {
           const filtered = activeId ? prev.filter((m) => m.id !== activeId) : prev;
           return [

@@ -57,7 +57,7 @@ export function MessageBubble({
     return (
       <div
         className={cn(
-          "group ml-auto flex max-w-[min(85%,36rem)] flex-col items-end gap-1.5",
+          "group ml-auto flex max-w-[min(90%,40rem)] flex-col items-end gap-1",
           baseAnim,
         )}
       >
@@ -76,9 +76,8 @@ export function MessageBubble({
             {hasText ? (
               <p
                 className={cn(
-                  "ml-auto w-fit rounded-[18px] border border-border/60 bg-secondary/70 px-4 py-2",
-                  "text-left text-[18px]/[1.8] whitespace-pre-wrap break-words",
-                  "shadow-[0_10px_24px_-18px_rgba(0,0,0,0.55)]",
+                  "ml-auto w-fit rounded-[14px] rounded-br-[4px] border border-border/60 bg-card p-3",
+                  "text-left text-[15px] leading-relaxed whitespace-pre-wrap break-words",
                 )}
               >
                 <HighlightedText
@@ -89,13 +88,15 @@ export function MessageBubble({
                 />
               </p>
             ) : null}
-            <MessageActions
-              role="user"
-              text={message.content}
-              onRegenerate={() => {}}
-              onEdit={() => setIsEditing(true)}
-            />
-            <MessageTimestamp createdAt={message.createdAt} className="mr-1" />
+            <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+              <MessageActions
+                role="user"
+                text={message.content}
+                onRegenerate={() => {}}
+                onEdit={() => setIsEditing(true)}
+              />
+              <MessageTimestamp createdAt={message.createdAt} className="mr-1" />
+            </div>
           </>
         )}
       </div>
@@ -131,9 +132,16 @@ export function MessageBubble({
       </div>
     );
   }
+  // Final safety net for tool-pivot turns that escaped the stream/message
+  // filters (e.g. history-replayed legacy messages persisted before the
+  // backend strip_think landed). A bare reasoning pill with no answer text
+  // adds visual noise between the user's question and the real reply.
+  if (noVisibleYet) {
+    return null;
+  }
   return (
     <div
-      className={cn("group w-full text-sm", baseAnim)}
+      className={cn("group w-full text-[15px]", baseAnim)}
       style={{ lineHeight: "var(--cjk-line-height)" }}
     >
       <ReasoningDrawer reasoning={reasoning} />
@@ -147,16 +155,15 @@ export function MessageBubble({
       </MarkdownText>
       {message.isStreaming && <StreamCursor />}
       {!message.isStreaming && (
-        <>
+        <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <MessageActions
             role="assistant"
             text={visible}
             onRegenerate={onRegenerate ?? (() => {})}
             onEdit={() => {}}
-            className="mt-1"
           />
           <MessageTimestamp createdAt={message.createdAt} />
-        </>
+        </div>
       )}
     </div>
   );

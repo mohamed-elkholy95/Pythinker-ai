@@ -18,7 +18,9 @@ describe("MessageBubble", () => {
     const pill = screen.getByText("hello");
 
     expect(row).toHaveClass("ml-auto", "flex");
-    expect(pill).toHaveClass("ml-auto", "w-fit", "rounded-[18px]");
+    // Manus-style asymmetric corner: rounded everywhere except bottom-right
+    // (the corner pointing at the speaker), which gets a tighter radius.
+    expect(pill).toHaveClass("ml-auto", "w-fit", "rounded-[14px]", "rounded-br-[4px]");
   });
 
   it("renders trace messages as compact chips that expand to full lines", () => {

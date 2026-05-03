@@ -13,6 +13,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
 import type { AdminTabId } from "@/lib/admin-tabs";
 import { deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
+import { cleanChatTitle } from "@/lib/chatTitle";
 import { PythinkerClient } from "@/lib/pythinker-client";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { ChatSummary } from "@/lib/types";
@@ -29,7 +30,11 @@ type BootState =
     };
 
 const SIDEBAR_STORAGE_KEY = "pythinker-webui.sidebar";
-const SIDEBAR_WIDTH = 258;
+// Desktop sidebar width: 288px on lg, 312px on xl+. Slightly more
+// breathing room for nav labels + chat titles without crowding the
+// thread. Mobile sheet keeps its own width below.
+const SIDEBAR_WIDTH = 288;
+const SIDEBAR_WIDTH_XL = 312;
 
 function readSidebarOpen(): boolean {
   if (typeof window === "undefined") return true;
@@ -322,8 +327,8 @@ function Shell() {
   });
 
   const headerTitle = activeSession
-    ? activeSession.title?.trim() ||
-      activeSession.preview ||
+    ? cleanChatTitle(activeSession.title) ||
+      cleanChatTitle(activeSession.preview) ||
       t("chat.fallbackTitle")
     : t("app.brand");
 
@@ -366,11 +371,15 @@ function Shell() {
           "relative z-20 hidden shrink-0 overflow-hidden lg:block",
           "transition-[width] duration-300 ease-out",
         )}
-        style={{ width: desktopSidebarOpen ? SIDEBAR_WIDTH : 0 }}
+        style={{
+          width: desktopSidebarOpen
+            ? `clamp(${SIDEBAR_WIDTH}px, 22vw, ${SIDEBAR_WIDTH_XL}px)`
+            : 0,
+        }}
       >
         <div
           className={cn(
-            "absolute inset-y-0 left-0 h-full w-[258px] overflow-hidden bg-sidebar shadow-inner-right",
+            "absolute inset-y-0 left-0 h-full w-full overflow-hidden bg-sidebar shadow-inner-right",
             "transition-transform duration-300 ease-out",
             desktopSidebarOpen ? "translate-x-0" : "-translate-x-full",
           )}
@@ -386,7 +395,7 @@ function Shell() {
         <SheetContent
           side="left"
           showCloseButton={false}
-          className="w-[258px] p-0 sm:max-w-[258px] lg:hidden"
+          className="w-[88vw] max-w-[320px] p-0 sm:max-w-[320px] lg:hidden"
         >
           <Sidebar {...sidebarProps} onCollapse={closeMobileSidebar} />
         </SheetContent>

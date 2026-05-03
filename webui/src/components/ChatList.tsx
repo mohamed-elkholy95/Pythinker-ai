@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { ChatRow } from "@/components/ChatRow";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { cleanChatTitle } from "@/lib/chatTitle";
 import type { ChatSummary } from "@/lib/types";
 
 export interface ChatSection {
@@ -32,9 +33,12 @@ function titleFor(s: ChatSummary, fallbackTitle: string): string {
   // Prefer the LLM-generated chat title, then the literal first user
   // message preview, then the i18n fallback. The title is already capped
   // server-side; preview is truncated here for sidebar layout.
-  const summarized = s.title?.trim();
+  // ``cleanChatTitle`` strips legacy ``<think>...</think>`` blocks (and
+  // unterminated streaming tails) so old chats from before the backend
+  // fix land cleanly without a one-shot migration.
+  const summarized = cleanChatTitle(s.title);
   if (summarized) return summarized;
-  const p = s.preview?.trim();
+  const p = cleanChatTitle(s.preview);
   if (p) return p.length > 48 ? `${p.slice(0, 45)}…` : p;
   return fallbackTitle;
 }

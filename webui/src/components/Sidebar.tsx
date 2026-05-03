@@ -1,14 +1,23 @@
 import {
   Activity,
+  Bot,
+  Bug,
+  CalendarClock,
   Database,
+  Gauge,
+  Globe2,
   LayoutDashboard,
   MessageSquare,
   Moon,
+  Palette,
   PanelLeftClose,
   Plus,
   RefreshCcw,
+  ScrollText,
   Settings,
+  Sparkles,
   Sun,
+  Zap,
 } from "lucide-react";
 import { useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -183,9 +192,23 @@ export function Sidebar(props: SidebarProps) {
           {t("sidebar.newChat")}
         </Button>
       </div>
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col overflow-y-auto",
+          // Thin sidebar scrollbar: only paints when content overflows;
+          // tracks the sidebar background and tints with the muted color so
+          // it never fights the chat content for attention.
+          "scrollbar-thin",
+          "[&::-webkit-scrollbar]:w-1.5",
+          "[&::-webkit-scrollbar-thumb]:rounded-full",
+          "[&::-webkit-scrollbar-thumb]:bg-muted-foreground/25",
+          "[&::-webkit-scrollbar-thumb]:hover:bg-muted-foreground/45",
+          "[&::-webkit-scrollbar-track]:bg-transparent",
+        )}
+      >
       {props.onNavigateAdmin ? (
         <div className="space-y-3 px-3 pb-3">
-          <NavGroup label="Agent">
+          <NavGroup label="Chat">
             <NavButton
               active={props.activeView !== "admin"}
               icon={<MessageSquare className="h-3.5 w-3.5" />}
@@ -193,34 +216,88 @@ export function Sidebar(props: SidebarProps) {
               onClick={props.onOpenChat}
             />
           </NavGroup>
-          <NavGroup label="Control">
-            <NavButton
-              active={
-                props.activeView === "admin" && props.adminActiveTab === "overview"
-              }
+          <NavGroup label="Monitor">
+            <AdminNavButton
+              tab="overview"
               icon={<LayoutDashboard className="h-3.5 w-3.5" />}
               label="Overview"
-              onClick={() => props.onNavigateAdmin?.("overview")}
+              {...props}
             />
-            <NavButton
-              active={props.activeView === "admin" && props.adminActiveTab === "usage"}
-              icon={<Activity className="h-3.5 w-3.5" />}
+            <AdminNavButton
+              tab="usage"
+              icon={<Gauge className="h-3.5 w-3.5" />}
               label="Usage"
-              onClick={() => props.onNavigateAdmin?.("usage")}
+              {...props}
             />
-            <NavButton
-              active={props.activeView === "admin" && props.adminActiveTab === "sessions"}
-              icon={<Database className="h-3.5 w-3.5" />}
-              label="Sessions"
-              onClick={() => props.onNavigateAdmin?.("sessions")}
+            <AdminNavButton
+              tab="logs"
+              icon={<ScrollText className="h-3.5 w-3.5" />}
+              label="Logs"
+              {...props}
             />
           </NavGroup>
-          <NavGroup label="Settings">
-            <NavButton
-              active={props.activeView === "admin" && props.adminActiveTab === "config"}
+          <NavGroup label="Workspace">
+            <AdminNavButton
+              tab="channels"
+              icon={<Globe2 className="h-3.5 w-3.5" />}
+              label="Channels"
+              {...props}
+            />
+            <AdminNavButton
+              tab="sessions"
+              icon={<Database className="h-3.5 w-3.5" />}
+              label="Sessions"
+              {...props}
+            />
+            <AdminNavButton
+              tab="agents"
+              icon={<Bot className="h-3.5 w-3.5" />}
+              label="Agents"
+              {...props}
+            />
+            <AdminNavButton
+              tab="skills"
+              icon={<Zap className="h-3.5 w-3.5" />}
+              label="Skills"
+              {...props}
+            />
+            <AdminNavButton
+              tab="dreams"
+              icon={<Sparkles className="h-3.5 w-3.5" />}
+              label="Dreams"
+              {...props}
+            />
+            <AdminNavButton
+              tab="cron"
+              icon={<CalendarClock className="h-3.5 w-3.5" />}
+              label="Cron"
+              {...props}
+            />
+          </NavGroup>
+          <NavGroup label="System">
+            <AdminNavButton
+              tab="config"
               icon={<Settings className="h-3.5 w-3.5" />}
               label="Config"
-              onClick={() => props.onNavigateAdmin?.("config")}
+              {...props}
+            />
+            <AdminNavButton
+              tab="appearance"
+              icon={<Palette className="h-3.5 w-3.5" />}
+              label="Appearance"
+              {...props}
+            />
+            <AdminNavButton
+              tab="infrastructure"
+              icon={<Activity className="h-3.5 w-3.5" />}
+              label="Infrastructure"
+              {...props}
+            />
+            <AdminNavButton
+              tab="debug"
+              icon={<Bug className="h-3.5 w-3.5" />}
+              label="Debug"
+              {...props}
             />
           </NavGroup>
         </div>
@@ -241,7 +318,7 @@ export function Sidebar(props: SidebarProps) {
             <RefreshCcw className="h-3.5 w-3.5" />
           </Button>
         </div>
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1">
           <ChatList
             sections={sections}
             activeKey={props.activeKey}
@@ -257,6 +334,7 @@ export function Sidebar(props: SidebarProps) {
           />
         </div>
       </SidebarSearch>
+      </div>
       <Separator className="bg-sidebar-border/70" />
       <div className="flex items-center justify-between gap-2 px-2.5 py-2 text-xs">
         <ConnectionBadge />
@@ -308,5 +386,27 @@ function NavButton({
       {icon}
       <span className="truncate">{label}</span>
     </button>
+  );
+}
+
+function AdminNavButton({
+  tab,
+  icon,
+  label,
+  activeView,
+  adminActiveTab,
+  onNavigateAdmin,
+}: {
+  tab: AdminTabId;
+  icon: ReactNode;
+  label: string;
+} & Pick<SidebarProps, "activeView" | "adminActiveTab" | "onNavigateAdmin">) {
+  return (
+    <NavButton
+      active={activeView === "admin" && adminActiveTab === tab}
+      icon={icon}
+      label={label}
+      onClick={() => onNavigateAdmin?.(tab)}
+    />
   );
 }

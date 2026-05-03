@@ -93,7 +93,7 @@ export function ThreadViewport({
         <div ref={contentRef}>
           {hasMessages ? (
             <div className="mx-auto flex min-h-full w-full max-w-[64rem] flex-col">
-              <div className="flex-1 px-5 pb-36 pt-4 sm:px-6 md:px-8">
+              <div className="flex-1 px-5 pb-32 pt-4 sm:px-6 md:px-8">
                 <ThreadMessages
                   messages={messages}
                   onRegenerate={onRegenerate}
@@ -101,15 +101,46 @@ export function ThreadViewport({
                 />
               </div>
 
-              <div
-                className={cn(
-                  "sticky bottom-0 z-10 mt-auto",
-                  "bg-gradient-to-t from-background via-background/95 to-transparent",
-                  "pt-6",
-                )}
-              >
-                <div className="px-5 pb-3 sm:px-6 md:px-8">
-                  {composer}
+              <div className="sticky bottom-0 z-10 mt-auto">
+                {/* Smooth 40px fade-in above the composer band: text scrolling
+                 * up under the composer dissolves into the background instead
+                 * of butting against a hard edge. */}
+                <div
+                  aria-hidden
+                  className="h-10 bg-gradient-to-t from-background to-transparent"
+                />
+                {/* Composer band — slightly translucent + frosted so content
+                 * scrolling underneath is hinted at without bleeding through. */}
+                <div
+                  className={cn(
+                    "px-5 pb-3 pt-3 sm:px-6 md:px-8",
+                    "bg-background/85 backdrop-blur-md",
+                  )}
+                >
+                  {/* Inner rail matches the composer pill width — the pill
+                   * is now ``w-full`` so it spans the chat-area width above,
+                   * and the scroll-to-bottom button's ``right-0`` tracks the
+                   * pill's right edge (which is also the chat-area right
+                   * edge). */}
+                  <div className="relative w-full">
+                    {!isAtBottom && (
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => void scrollToBottom("smooth")}
+                        className={cn(
+                          "absolute -top-14 right-0 z-20 h-9 w-9 rounded-full",
+                          "border border-border/70 bg-card shadow-[0_5px_16px_-6px_hsl(var(--foreground)/0.18),0_0_0_1px_hsl(var(--border)/0.4)]",
+                          "hover:bg-accent",
+                          "animate-in fade-in-0 zoom-in-95",
+                        )}
+                        aria-label={t("thread.scrollToBottom")}
+                      >
+                        <ArrowDown className="h-5 w-5" />
+                      </Button>
+                    )}
+                    {composer}
+                  </div>
                 </div>
               </div>
             </div>
@@ -130,22 +161,6 @@ export function ThreadViewport({
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-background to-transparent"
       />
-
-      {!isAtBottom && (
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={() => void scrollToBottom("smooth")}
-          className={cn(
-            "absolute bottom-28 left-1/2 h-8 w-8 -translate-x-1/2 rounded-full shadow-md",
-            "bg-background/90 backdrop-blur",
-            "animate-in fade-in-0 zoom-in-95",
-          )}
-          aria-label={t("thread.scrollToBottom")}
-        >
-          <ArrowDown className="h-4 w-4" />
-        </Button>
-      )}
     </div>
   );
 }

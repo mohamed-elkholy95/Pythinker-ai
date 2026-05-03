@@ -15,19 +15,19 @@ export type AdminTabId =
   | "logs";
 
 const TAB_LOOKUP: Record<AdminTabId, { group: string; label: string }> = {
-  overview: { group: "Control", label: "Overview" },
-  channels: { group: "Control", label: "Channels" },
-  sessions: { group: "Control", label: "Sessions" },
-  usage: { group: "Control", label: "Usage" },
-  cron: { group: "Control", label: "Cron" },
-  agents: { group: "Agent", label: "Agents" },
-  skills: { group: "Agent", label: "Skills" },
-  dreams: { group: "Agent", label: "Dreams" },
-  config: { group: "Settings", label: "Config" },
-  appearance: { group: "Settings", label: "Appearance" },
-  infrastructure: { group: "Settings", label: "Infrastructure" },
-  debug: { group: "Settings", label: "Debug" },
-  logs: { group: "Settings", label: "Logs" },
+  overview: { group: "Monitor", label: "Overview" },
+  usage: { group: "Monitor", label: "Usage" },
+  logs: { group: "Monitor", label: "Logs" },
+  channels: { group: "Workspace", label: "Channels" },
+  sessions: { group: "Workspace", label: "Sessions" },
+  agents: { group: "Workspace", label: "Agents" },
+  skills: { group: "Workspace", label: "Skills" },
+  dreams: { group: "Workspace", label: "Dreams" },
+  cron: { group: "Workspace", label: "Cron" },
+  config: { group: "System", label: "Config" },
+  appearance: { group: "System", label: "Appearance" },
+  infrastructure: { group: "System", label: "Infrastructure" },
+  debug: { group: "System", label: "Debug" },
 };
 
 export function adminTabMeta(tabId: AdminTabId): { group: string; label: string } {

@@ -35,7 +35,7 @@ export function MessageTimestamp({ createdAt, className }: MessageTimestampProps
       dateTime={new Date(createdAt).toISOString()}
       title={t("timestamp.tooltipFull", { stamp: fullStamp })}
       className={cn(
-        "select-none text-[10.5px] tabular-nums text-muted-foreground/60",
+        "select-none text-[11px] tabular-nums text-muted-foreground dark:text-muted-foreground/90",
         "opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100",
         "motion-reduce:transition-none",
         className,

@@ -175,6 +175,13 @@ mitigations:
   loopback deployment. The websockets HTTP parser is GET-only by design, so
   these mutations use action-in-path URLs (mirroring `/api/sessions/{key}/pin`
   and friends) rather than HTTP verbs.
+- **Admin mutations are logged at INFO** with the line
+  `admin_mutation route=… key=…`. By default Pythinker only configures a
+  loguru stderr sink (`pythinker/utils/log.py`), so audit lines appear on
+  the gateway's stderr rather than in the dashboard's Logs feed. To
+  surface them in the WebUI, point `runtime.telemetry_jsonl_path` at a
+  file or run `pythinker gateway` with stderr captured into
+  `~/.pythinker/logs/*.log` — the Logs tab tails both.
 
 ## Compatibility table
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 from loguru import logger
 
 from pythinker.providers.base import LLMProvider
+from pythinker.utils.helpers import strip_think
 
 _TITLE_PROMPT = (
     "Read the following short conversation and produce a concise chat title "
@@ -32,7 +33,13 @@ def _truncate(text: str, n: int) -> str:
 
 
 def _clean_title(raw: str) -> str:
-    """Strip quotes, trailing punctuation, and excess whitespace from a title."""
+    """Strip quotes, trailing punctuation, and excess whitespace from a title.
+
+    Reasoning models (DeepSeek-R1, MiniMax reasoning_split, etc.) sometimes
+    return ``<think>...</think>`` chain-of-thought ahead of the actual title.
+    Drop those blocks first so the persisted title is clean.
+    """
+    raw = strip_think(raw or "")
     title = raw.strip().splitlines()[0] if raw else ""
     title = title.strip().strip("\"'`“”‘’ ").rstrip(".!?,:;").strip()
     if len(title) > _MAX_OUTPUT_CHARS:

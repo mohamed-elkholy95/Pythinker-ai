@@ -6,6 +6,39 @@ All notable user-visible changes to Pythinker land here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- **WebUI admin: live agent + subagent panel.** The Agents tab now shows,
+  for each session, whether a turn is in flight and any spawned
+  subagents — with phase, iteration, elapsed time, and the last tool
+  event. Stale empty entries from the agent loop's per-session task map
+  are filtered so the panel only lists sessions that are actually busy.
+- **WebUI admin: stop, restart, and cancel controls.** Per-row buttons
+  in the Sessions tab and the Live agents panel hit three new GET
+  routes (`/api/admin/sessions/{key}/stop`,
+  `/api/admin/sessions/{key}/restart`,
+  `/api/admin/subagents/{task_id}/cancel`). Restart cancels the
+  in-flight turn and clears the runtime checkpoint and pending-turn
+  state so the next message starts fresh from persisted history; it
+  refuses to materialise a session for an unknown key.
+- **WebUI admin: log timestamps.** The Logs tab now renders a
+  `HH:MM:SS` leading column when the backing entry carries a `ts`,
+  `time`, or `timestamp` field. Entries without a timestamp are
+  unchanged.
+- **`SessionManager.load_existing(key)`** — a read-only counterpart to
+  `get_or_create` that returns `None` for unknown keys instead of
+  silently creating and persisting a blank session.
+
+### Security
+
+- Admin write endpoints require an `X-Pythinker-Admin-Action: 1` request
+  header in addition to the existing bearer token. Cross-site browser
+  tabs can fire GET requests from `<img>` / `<form>` elements but cannot
+  set custom headers without a CORS preflight that the server never
+  answers, so this header alone defeats drive-by writes for the
+  localhost-only deployment posture Pythinker targets. See
+  `docs/security.md` for the full rationale.
+
 ## [2.1.1] - 2026-05-03
 
 ### Fixed

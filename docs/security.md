@@ -164,6 +164,17 @@ mitigations:
   gates. They are intended for local operators; keep the WebUI behind loopback,
   a tunnel, or real reverse-proxy authentication before exposing these controls
   to other users.
+- **Admin write endpoints require a custom request header.** The runtime
+  controls exposed by the Admin Dashboard — `/api/admin/sessions/{key}/stop`,
+  `/api/admin/sessions/{key}/restart`, `/api/admin/subagents/{task_id}/cancel` —
+  reject any request that does not present `X-Pythinker-Admin-Action: 1` in
+  addition to a valid bearer token. Cross-site browser tabs can fire GET
+  requests from `<img>` / `<form>` elements but cannot set custom headers
+  without a CORS preflight that the server never answers, so a malicious page
+  in another tab cannot trigger a session stop or subagent cancel even on a
+  loopback deployment. The websockets HTTP parser is GET-only by design, so
+  these mutations use action-in-path URLs (mirroring `/api/sessions/{key}/pin`
+  and friends) rather than HTTP verbs.
 
 ## Compatibility table
 

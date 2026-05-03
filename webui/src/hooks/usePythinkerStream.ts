@@ -213,8 +213,21 @@ export function usePythinkerStream(
         const finalText = buffer.current.parts.join("");
         cancelFlush();
         buffer.current = null;
+        // Stop latency BEFORE filtering — otherwise the interval keeps
+        // firing against an id that no longer exists in the messages list.
         stopLatency(finalId);
         setIsStreaming(false);
+        // Reasoning + tool-call assistant turns produce a stream that ends
+        // with no visible answer text (the model emitted only ``<think>...``
+        // followed by tool calls, and the next turn streams as a new bubble).
+        // Finalizing the placeholder in that case leaves a blank assistant
+        // row in the thread for every tool pivot. Drop the placeholder
+        // entirely so only turns that actually produced visible answer text
+        // become persistent bubbles.
+        if (finalText.length === 0) {
+          setMessages((prev) => prev.filter((m) => m.id !== finalId));
+          return;
+        }
         // Flush any deltas that hadn't yet been painted in the trailing
         // frame, then mark the bubble as no longer streaming.
         setMessages((prev) =>

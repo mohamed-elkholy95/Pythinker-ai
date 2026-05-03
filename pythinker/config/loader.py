@@ -87,6 +87,17 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+    ensure_config_file_permissions(path)
+
+
+def ensure_config_file_permissions(path: Path) -> None:
+    """Best-effort POSIX hardening for config files that may contain secrets."""
+    if os.name == "nt":
+        return
+    try:
+        path.chmod(0o600)
+    except OSError as exc:
+        logger.debug("Could not set secure config permissions on {}: {}", path, exc)
 
 
 _API_KEY_PROVIDERS: frozenset[str] = frozenset({"brave", "tavily", "jina", "kagi"})

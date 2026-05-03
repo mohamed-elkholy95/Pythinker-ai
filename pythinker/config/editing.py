@@ -16,7 +16,7 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 from pydantic.alias_generators import to_camel
 
-from pythinker.config.loader import save_config
+from pythinker.config.loader import ensure_config_file_permissions, save_config
 from pythinker.config.schema import Config
 
 SECRET_PLACEHOLDER = "********"
@@ -357,6 +357,7 @@ def restore_config_backup(config_path: Path, backup_id: str) -> None:
     try:
         tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         os.replace(tmp, config_path)
+        ensure_config_file_permissions(config_path)
     finally:
         if tmp.exists():
             tmp.unlink()

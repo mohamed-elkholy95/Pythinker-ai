@@ -1,6 +1,10 @@
 import json
+import os
 import socket
+import stat
 from unittest.mock import patch
+
+import pytest
 
 from pythinker.config.loader import load_config, save_config
 from pythinker.security.network import validate_url_target
@@ -62,6 +66,15 @@ def test_save_config_writes_context_window_tokens_but_not_memory_window(tmp_path
     assert defaults["maxTokens"] == 2222
     assert defaults["contextWindowTokens"] == 65_536
     assert "memoryWindow" not in defaults
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes do not map to Windows ACLs")
+def test_save_config_sets_secret_safe_file_mode_on_posix(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+
+    save_config(load_config(config_path), config_path)
+
+    assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
 
 
 def test_onboard_does_not_crash_with_legacy_memory_window(tmp_path, monkeypatch) -> None:

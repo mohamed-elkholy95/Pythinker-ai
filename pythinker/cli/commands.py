@@ -670,6 +670,7 @@ def _onboard_plugins(config_path: Path) -> None:
     import json
 
     from pythinker.channels.registry import discover_all
+    from pythinker.config.loader import ensure_config_file_permissions
 
     all_channels = discover_all()
     if not all_channels:
@@ -691,6 +692,7 @@ def _onboard_plugins(config_path: Path) -> None:
 
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+    ensure_config_file_permissions(config_path)
 
 
 def _make_provider(config: Config):
@@ -2923,7 +2925,11 @@ def backup_restore(
 
     import pydantic
 
-    from pythinker.config.loader import _migrate_config, get_config_path
+    from pythinker.config.loader import (
+        _migrate_config,
+        ensure_config_file_permissions,
+        get_config_path,
+    )
     from pythinker.config.schema import Config
 
     src = Path(path)
@@ -2970,6 +2976,7 @@ def backup_restore(
     try:
         shutil.copy2(src, tmp_path)
         os.replace(tmp_path, cfg_path)
+        ensure_config_file_permissions(cfg_path)
     except OSError as exc:
         with contextlib.suppress(OSError):
             tmp_path.unlink()

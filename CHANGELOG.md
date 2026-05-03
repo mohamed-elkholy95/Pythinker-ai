@@ -6,6 +6,34 @@ All notable user-visible changes to Pythinker land here. The project follows
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-05-03
+
+### Fixed
+
+- **WebUI: empty stream-end placeholders no longer linger.** Reasoning
+  models that emit only `<think>...</think>` text on the wire before a
+  tool call (DeepSeek-R1, MiniMax `reasoning_split`, VolcEngine
+  `thinking`) used to leave a blank assistant bubble after the stream
+  closed; the WS stream end now drops messages whose visible delta
+  text is empty.
+- **Agent: `<think>` blocks are now stripped from generated chat
+  titles.** Reasoning models occasionally prepended chain-of-thought to
+  the title prompt response; `_clean_title` now removes any
+  `<think>...</think>` span before quote/punctuation trimming so titles
+  read cleanly in the sessions list.
+
+### Changed
+
+- **Internal lint hygiene.** Test tree now passes the full ruff rule
+  set (E, F, I, N, W) cleanly; `pytest.mark.timeout` is registered;
+  `asyncio.wait_for(coro, timeout=...)` in `pythinker/agent/loop.py` is
+  replaced with the recommended `async with asyncio.timeout(...)` form
+  to suppress a spurious `RuntimeWarning: coroutine 'Queue.get' was
+  never awaited`. No public API change.
+- **PyPI metadata.** Author now resolves cleanly to `Mohamed Elkholy
+  <moelkholy1995@gmail.com>`; project Homepage now points to
+  `https://pythinker.com`.
+
 ## [2.1.0] - 2026-05-02
 
 ### Added

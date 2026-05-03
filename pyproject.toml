@@ -1,6 +1,6 @@
 [project]
 name = "pythinker-ai"
-version = "2.1.0"
+version = "2.1.1"
 description = "Pythinker — an ultra-lightweight personal AI agent framework with built-in chat channels, memory, MCP, and an OpenAI-compatible API."
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"

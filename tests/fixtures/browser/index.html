@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Pythinker browser fixture</title></head>
+<body>
+  <h1 id="title">Hello from fixture</h1>
+  <form id="f" action="javascript:void(0)" onsubmit="document.getElementById('out').textContent = document.getElementById('email').value">
+    <input id="email" type="email" placeholder="email" />
+    <button id="go" type="submit">Submit</button>
+  </form>
+  <p id="out"></p>
+  <a id="reveal" href="#">Hover for menu</a>
+  <div id="menu" style="display:none">menu visible</div>
+  <script>
+    document.getElementById('reveal').addEventListener('mouseenter', () => {
+      document.getElementById('menu').style.display = 'block';
+    });
+  </script>
+</body>
+</html>

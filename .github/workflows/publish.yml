@@ -1,0 +1,267 @@
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Where to publish"
+        required: true
+        default: "testpypi"
+        type: choice
+        options:
+          - testpypi
+          - pypi
+
+jobs:
+  build:
+    name: Build sdist and wheel
+    runs-on: ubuntu-latest
+    outputs:
+      package_version: ${{ steps.pkgver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Resolve package version (and verify tag matches pyproject)
+        id: pkgver
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          PYPROJECT_VER=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [[ "$EVENT_NAME" == "release" ]]; then
+            TAG_VER="${RELEASE_TAG#v}"
+            if [[ "$TAG_VER" != "$PYPROJECT_VER" ]]; then
+              echo "::error::release tag '$TAG_VER' does not match pyproject.toml version '$PYPROJECT_VER'"
+              exit 1
+            fi
+            VER="$TAG_VER"
+          else
+            VER="$PYPROJECT_VER"
+          fi
+          echo "Using package version: $VER"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Verify pythinker/__init__.py fallback matches pyproject.toml
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ steps.pkgver.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Source-only checkouts read this fallback; drift makes
+          # `pythinker --version` lie until install. The local
+          # `pythinker release check` runs the same gate.
+          FALLBACK=$(python -c "import re,sys;m=re.search(r'_read_pyproject_version\(\)\s*or\s*\"([^\"]+)\"', open('pythinker/__init__.py').read()); print(m.group(1) if m else '')")
+          if [ -z "$FALLBACK" ]; then
+            echo "::error::could not parse fallback version from pythinker/__init__.py"
+            exit 1
+          fi
+          if [ "$FALLBACK" != "$PACKAGE_VERSION" ]; then
+            echo "::error::pythinker/__init__.py fallback ($FALLBACK) does not match pyproject.toml ($PACKAGE_VERSION)"
+            exit 1
+          fi
+
+      - name: Verify CHANGELOG.md has a section for this version
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ steps.pkgver.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ ! -f CHANGELOG.md ]; then
+            echo "::error::CHANGELOG.md is missing"
+            exit 1
+          fi
+          # Match either "## [X.Y.Z]" or "## [X.Y.Z] - YYYY-MM-DD".
+          # PACKAGE_VERSION is sourced from pyproject.toml (and on releases,
+          # also verified to equal the tag); never from untrusted input.
+          ESCAPED=$(printf '%s' "$PACKAGE_VERSION" | sed 's/[][\.*^$+?{}|()]/\\&/g')
+          if ! grep -E "^##[[:space:]]+\[${ESCAPED}\]([[:space:]]*-[[:space:]]*[0-9]{4}-[0-9]{2}-[0-9]{2})?[[:space:]]*$" CHANGELOG.md > /dev/null; then
+            echo "::error::CHANGELOG.md is missing a section for [${PACKAGE_VERSION}] — promote [Unreleased] before tagging"
+            exit 1
+          fi
+
+      - name: Install build + twine
+        run: python -m pip install --upgrade build twine
+
+      - name: Build distributions
+        run: python -m build
+
+      - name: Verify wheel filename embeds the version
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ steps.pkgver.outputs.version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(dist/pythinker_ai-*.whl)
+          if [ "${#wheels[@]}" -eq 0 ]; then
+            echo "::error::no pythinker_ai wheel produced in dist/"
+            exit 1
+          fi
+          for w in "${wheels[@]}"; do
+            base=$(basename "$w")
+            case "$base" in
+              *"-${PACKAGE_VERSION}-"*) echo "ok: $base" ;;
+              *) echo "::error::wheel filename $base does not embed version ${PACKAGE_VERSION}"; exit 1 ;;
+            esac
+          done
+
+      - name: twine check distributions
+        run: python -m twine check dist/*
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/pythinker-ai
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build
+    if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi') }}
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pythinker-ai
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  post-publish-smoke:
+    name: Post-publish install smoke (${{ matrix.os }})
+    needs: [build, publish-pypi]
+    if: ${{ always() && needs.publish-pypi.result == 'success' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        # setup-uv does not publish a floating v8 major tag; pin to v8.1.0 SHA.
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+
+      - name: System dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libolm-dev build-essential
+
+      - name: Wait for PyPI propagation
+        shell: bash
+        run: sleep 120
+
+      - name: Install released wheel from PyPI
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ needs.build.outputs.package_version }}
+        run: |
+          set -euo pipefail
+          uv tool install --reinstall "pythinker-ai==${PACKAGE_VERSION}"
+          uv tool update-shell || true
+
+      - name: Verify pythinker --version
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ needs.build.outputs.package_version }}
+        run: |
+          export PATH="$(uv tool dir --bin):$PATH"
+          OUT=$(pythinker --version)
+          echo "$OUT"
+          echo "$OUT" | grep -F "${PACKAGE_VERSION}"
+
+      - name: Run pythinker doctor (post-install, no config)
+        shell: bash
+        run: |
+          export PATH="$(uv tool dir --bin):$PATH"
+          set +e
+          pythinker doctor --non-interactive
+          code=$?
+          set -e
+          # Fresh install with no config: doctor should exit 0/1/2 but never crash.
+          if [[ "$code" -gt 2 ]]; then
+            echo "::error::doctor exited with unexpected code $code (crash or entry-point bug)"
+            exit 1
+          fi
+
+  purge-readme-cache:
+    name: Purge README camo cache (GitHub)
+    needs: publish-pypi
+    if: ${{ github.event_name == 'release' && needs.publish-pypi.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Forces GitHub's camo proxy (camo.githubusercontent.com) to drop its
+      # cached copies of the external images referenced in README.md so the
+      # shields.io PyPI / downloads badges refresh within ~5 minutes instead
+      # of waiting hours for camo's TTL to expire naturally. The PyPI project
+      # page does not use camo, so its copy of the same badge updates as soon
+      # as shields.io re-polls PyPI (capped by the cacheSeconds=300 hint
+      # already embedded in the badge URLs).
+      #
+      # No third-party Action dependency: we ask the GitHub REST API for the
+      # rendered README HTML (which includes the rewritten camo URLs), then
+      # send PURGE to each unique URL. PURGE on camo.githubusercontent.com
+      # is a long-standing, undocumented but stable invalidation hook.
+      - name: Purge GitHub camo cache for README badges
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          urls=$(gh api \
+                   -H 'Accept: application/vnd.github.html' \
+                   "/repos/${REPO}/readme" \
+                 | grep -Eo 'https://camo\.githubusercontent\.com/[A-Za-z0-9./_-]+' \
+                 | sort -u)
+          if [[ -z "${urls}" ]]; then
+            echo "No camo-proxied images found in README — nothing to purge."
+            exit 0
+          fi
+          printf '%s\n' "${urls}" | while IFS= read -r url; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -X PURGE "${url}")
+            printf 'PURGE %s -> %s\n' "${url}" "${code}"
+          done

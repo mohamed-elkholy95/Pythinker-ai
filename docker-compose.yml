@@ -1,0 +1,93 @@
+x-common-config: &common-config
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: app
+  volumes:
+    - ~/.pythinker:/home/pythinker/.pythinker
+  cap_drop:
+    - ALL
+  cap_add:
+    - SYS_ADMIN
+  security_opt:
+    - apparmor=unconfined
+    - seccomp=unconfined
+
+services:
+  pythinker-gateway:
+    container_name: pythinker-gateway
+    <<: *common-config
+    command: ["gateway"]
+    restart: unless-stopped
+    ports:
+      - 18790:18790
+    environment:
+      # CDP endpoint for the browser tool.
+      PYTHINKER_TOOLS__WEB__BROWSER__CDP_URL: "http://pythinker-browser:9222"
+      # Opts the browser tool in explicitly; comment out if you prefer to gate via config file.
+      PYTHINKER_TOOLS__WEB__BROWSER__ENABLE: "true"
+    depends_on:
+      pythinker-browser:
+        condition: service_healthy
+        required: false
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  pythinker-api:
+    container_name: pythinker-api
+    <<: *common-config
+    command:
+      ["serve", "--host", "0.0.0.0", "-w", "/home/pythinker/.pythinker/api-workspace"]
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:8900:8900
+    environment:
+      # CDP endpoint for the browser tool.
+      PYTHINKER_TOOLS__WEB__BROWSER__CDP_URL: "http://pythinker-browser:9222"
+      # Opts the browser tool in explicitly; comment out if you prefer to gate via config file.
+      PYTHINKER_TOOLS__WEB__BROWSER__ENABLE: "true"
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  pythinker-cli:
+    <<: *common-config
+    profiles:
+      - cli
+    command: ["status"]
+    stdin_open: true
+    tty: true
+
+  pythinker-browser:
+    profiles: ["browser"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: browser-runtime
+    environment:
+      BROWSER_ENABLE_VIEWER: "0"
+    ports:
+      - "127.0.0.1:9222:9222"
+    # ports:
+    #   - "127.0.0.1:6080:6080"   # uncomment + set BROWSER_ENABLE_VIEWER=1 to view via noVNC
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    cap_drop: [ALL]
+    cap_add: [SYS_ADMIN]
+    security_opt:
+      - apparmor=unconfined
+      - seccomp=unconfined
+    init: true
+    shm_size: "1gb"
+    restart: unless-stopped

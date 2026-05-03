@@ -1,0 +1,96 @@
+name: Install Smoke Test
+
+# Every push/PR: build the wheel, install it via `uv tool install` in a clean
+# environment, and verify the CLI is reachable and reports healthy.  Catches
+# regressions in packaging / entry-points / doctor before users see them.
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+
+jobs:
+  install-smoke:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        # setup-uv does not publish a floating v8 major tag; pin to v8.1.0 SHA.
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+
+      - name: System dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libolm-dev build-essential
+
+      - name: Build wheel
+        run: uv build --wheel
+
+      - name: Install wheel via uv tool install
+        shell: bash
+        run: |
+          WHEEL=$(ls dist/pythinker_ai-*.whl)
+          echo "Installing $WHEEL"
+          uv tool install --reinstall "$WHEEL"
+          uv tool update-shell || true
+
+      - name: Verify pythinker --version
+        shell: bash
+        run: |
+          export PATH="$(uv tool dir --bin):$PATH"
+          pythinker --version
+
+      - name: Run pythinker doctor (fresh install, no config)
+        shell: bash
+        run: |
+          export PATH="$(uv tool dir --bin):$PATH"
+          set +e
+          pythinker doctor --non-interactive
+          code=$?
+          set -e
+          # Fresh install has no config — doctor should exit 1 (config missing).
+          # Exit > 2 means doctor crashed or the entry point is broken.
+          if [[ "$code" -gt 2 ]]; then
+            echo "doctor exited with unexpected code $code (crash or entry-point bug)"
+            exit 1
+          fi
+          echo "doctor (fresh) exit code: $code"
+
+      - name: Run pythinker onboard (non-interactive)
+        shell: bash
+        run: |
+          export PATH="$(uv tool dir --bin):$PATH"
+          pythinker onboard --non-interactive --flow quickstart --yes-security --skip-gateway
+      - name: Run pythinker doctor (post-config, realistic state)
+        shell: bash
+        run: |
+          export PATH="$(uv tool dir --bin):$PATH"
+          set +e
+          pythinker doctor --non-interactive
+          code=$?
+          set -e
+          # Post-config: default provider is openai-codex (OAuth); no token in CI
+          # → doctor should return 1 (auth error) but not crash.
+          if [[ "$code" -gt 2 ]]; then
+            echo "doctor exited with unexpected code $code after writing config"
+            exit 1
+          fi
+          echo "doctor (post-config) exit code: $code"
+
+      - name: Verify pythinker is healthy after onboard
+        shell: bash
+        run: |
+          export PATH="$(uv tool dir --bin):$PATH"
+          pythinker --version
+          test -f "$HOME/.pythinker/config.json"             || { echo "config.json not created by onboard"; exit 1; }

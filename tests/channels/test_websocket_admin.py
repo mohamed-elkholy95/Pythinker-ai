@@ -1,0 +1,479 @@
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from pythinker.admin.service import AdminService
+from pythinker.channels.websocket import WebSocketChannel, WebSocketConfig
+from pythinker.config.loader import save_config
+from pythinker.config.schema import Config
+from pythinker.session.manager import Session, SessionManager
+
+
+def _request(token: str | None = "tok") -> MagicMock:
+    req = MagicMock()
+    req.path = "/api/admin/config"
+    req.headers = {"Authorization": f"Bearer {token}"} if token else {}
+    return req
+
+
+def _channel(tmp_path: Path, config: Config | None = None) -> tuple[WebSocketChannel, Config]:
+    cfg = config or Config()
+    cfg.agents.defaults.workspace = str(tmp_path / "workspace")
+    cfg.providers.openai.api_key = "sk-live"
+    config_path = tmp_path / "config.json"
+    save_config(cfg, config_path)
+    sm = SessionManager(cfg.workspace_path)
+    ws_session = Session(key="websocket:browser")
+    ws_session.add_message("user", "hello")
+    sm.save(ws_session)
+    slack_session = Session(key="slack:C123")
+    slack_session.add_message("user", "from slack")
+    sm.save(slack_session)
+    loop = SimpleNamespace(
+        _start_time=1000.0,
+        _last_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        model=cfg.agents.defaults.model,
+        workspace=cfg.workspace_path,
+    )
+    service = AdminService(
+        config=cfg,
+        config_path=config_path,
+        session_manager=sm,
+        agent_loop=loop,
+    )
+    ch = WebSocketChannel(
+        WebSocketConfig(enabled=True, host="127.0.0.1", port=8765),
+        bus=MagicMock(),
+        session_manager=sm,
+        agent_defaults=cfg.agents.defaults,
+        admin_service=service,
+    )
+    ch._api_tokens["tok"] = float("inf")
+    return ch, cfg
+
+
+def test_admin_config_route_requires_token(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+
+    response = channel._handle_admin_config(_request(token=None))
+
+    assert response.status_code == 401
+
+
+def test_admin_config_route_redacts_secrets(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+
+    response = channel._handle_admin_config(_request())
+
+    assert response.status_code == 200
+    body = json.loads(response.body)
+    assert body["config"]["providers"]["openai"]["apiKey"] == "********"
+    assert "providers.openai.api_key" in body["secret_paths"]
+
+
+def test_admin_config_schema_route_returns_schema_and_canonical_paths(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+
+    response = channel._handle_admin_config_schema(_request())
+
+    assert response.status_code == 200
+    body = json.loads(response.body)
+    assert body["schema"]["type"] == "object"
+    assert "providers.openai.api_key" in body["secret_paths"]
+    assert body["restart_required_paths"] == ["*"]
+
+
+def test_admin_config_route_includes_env_refs_and_field_defaults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ADMIN_TEST_OPENAI_KEY", "sk-expanded")
+    channel, _ = _channel(tmp_path)
+    service = channel._admin_service
+    assert service is not None
+    service.config_path.write_text(
+        json.dumps({"providers": {"openai": {"apiKey": "${ADMIN_TEST_OPENAI_KEY}"}}})
+    )
+
+    response = channel._handle_admin_config(_request())
+
+    assert response.status_code == 200
+    body = json.loads(response.body)
+    assert body["config"]["providers"]["openai"]["apiKey"] == "********"
+    assert body["env_references"] == {
+        "providers.openai.api_key": {"env_var": "ADMIN_TEST_OPENAI_KEY", "is_secret": True}
+    }
+    assert body["field_defaults"]["tools.web.browser.enable"] is False
+    assert "sk-expanded" not in json.dumps(body["env_references"])
+
+
+def test_admin_sessions_include_all_channels_without_paths(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+
+    response = channel._handle_admin_sessions(_request())
+
+    assert response.status_code == 200
+    body = json.loads(response.body)
+    keys = {row["key"] for row in body["sessions"]}
+    assert keys == {"websocket:browser", "slack:C123"}
+    assert all("path" not in row for row in body["sessions"])
+    assert all("usage" in row for row in body["sessions"])
+
+
+def test_admin_surfaces_route_returns_full_control_console_snapshot(tmp_path: Path) -> None:
+    cfg = Config.model_validate(
+        {"channels": {"telegram": {"enabled": True, "botToken": "telegram-token"}}}
+    )
+    channel, _ = _channel(tmp_path, cfg)
+
+    response = channel._handle_admin_surfaces(_request())
+
+    assert response.status_code == 200
+    body = json.loads(response.body)
+    assert {"overview", "channels", "agents", "skills", "cron", "dreams", "debug", "logs"} <= set(body)
+    assert body["channels"]["total"] >= 0
+    assert body["skills"]["total"] >= 1
+    assert body["infrastructure"]["workspace"] == str(channel._admin_service.config.workspace_path)
+    assert body["agents"]["routing"]["model"]
+    assert body["agents"]["routing"]["match_phase"]
+    assert body["runtime"]["policy_enabled"] == body["agents"]["policy_enabled"]
+    assert body["runtime"]["manifests_dir"] == body["agents"]["manifests_dir"]
+    assert body["providers"]["rows"]
+    assert {"name", "backend", "configured", "key_set", "active"} <= set(
+        body["providers"]["rows"][0]
+    )
+    assert "required_secrets" in body["channels"]["rows"][0]
+    assert "tools" in body
+    assert "runtime" in body
+
+
+def test_admin_channel_rows_include_sixty_uptime_buckets(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+    service = channel._admin_service
+    assert service is not None
+    service.channel_manager = SimpleNamespace(
+        get_status=lambda: {"websocket": {"enabled": True, "running": True}}
+    )
+
+    body = service.channels()
+
+    row = body["rows"][0]
+    assert len(row["uptime_buckets"]) == 60
+    assert all(isinstance(value, (int, float)) for value in row["uptime_buckets"])
+
+
+async def test_admin_config_set_rpc_saves_config_and_backup(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+    connection = MagicMock()
+    channel._admin_connections.add(connection)
+    channel._send_event = AsyncMock()
+
+    await channel._dispatch_envelope(
+        connection,
+        client_id="client-x",
+        envelope={
+            "type": "admin_config_set",
+            "request_id": "req-1",
+            "path": "logging.level",
+            "value": "DEBUG",
+        },
+    )
+
+    service = channel._admin_service
+    assert service is not None
+    assert json.loads(service.config_path.read_text())["logging"]["level"] == "DEBUG"
+    assert list(service.config_path.parent.glob("config.json.bak.*"))
+    channel._send_event.assert_awaited_with(
+        connection,
+        "admin_config_saved",
+        request_id="req-1",
+        path="logging.level",
+        restart_required=True,
+    )
+
+
+async def test_admin_config_rpc_returns_validation_errors(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+    connection = MagicMock()
+    channel._admin_connections.add(connection)
+    channel._send_event = AsyncMock()
+
+    await channel._dispatch_envelope(
+        connection,
+        client_id="client-x",
+        envelope={
+            "type": "admin_config_set",
+            "request_id": "req-2",
+            "path": "logging.level",
+            "value": "LOUD",
+        },
+    )
+
+    assert channel._send_event.await_args is not None
+    args, kwargs = channel._send_event.await_args
+    assert args[:2] == (connection, "admin_config_error")
+    assert kwargs["request_id"] == "req-2"
+    assert "Input should be" in kwargs["detail"]
+
+
+async def test_admin_config_rpc_rejects_non_admin_connections(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+    connection = MagicMock()
+    channel._send_event = AsyncMock()
+
+    await channel._dispatch_envelope(
+        connection,
+        client_id="client-x",
+        envelope={
+            "type": "admin_config_set",
+            "request_id": "req-3",
+            "path": "logging.level",
+            "value": "DEBUG",
+        },
+    )
+
+    channel._send_event.assert_awaited_with(
+        connection,
+        "admin_config_error",
+        request_id="req-3",
+        detail="admin token required",
+    )
+
+
+async def test_admin_config_write_preserves_env_var_secrets_on_disk(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ADMIN_TEST_OPENAI_KEY", "sk-expanded")
+    runtime = Config.model_validate(
+        {
+            "providers": {"openai": {"apiKey": "sk-expanded"}},
+            "logging": {"level": "INFO"},
+        }
+    )
+    channel, _ = _channel(tmp_path, runtime)
+    service = channel._admin_service
+    assert service is not None
+    raw_path = service.config_path
+    raw_path.write_text(
+        json.dumps(
+            {
+                "providers": {"openai": {"apiKey": "${ADMIN_TEST_OPENAI_KEY}"}},
+                "logging": {"level": "INFO"},
+            }
+        )
+    )
+    service.config_path = raw_path
+    connection = MagicMock()
+    channel._admin_connections.add(connection)
+    channel._send_event = AsyncMock()
+
+    await channel._dispatch_envelope(
+        connection,
+        client_id="client-x",
+        envelope={
+            "type": "admin_config_set",
+            "request_id": "req-4",
+            "path": "logging.level",
+            "value": "DEBUG",
+        },
+    )
+
+    on_disk = json.loads(raw_path.read_text())
+    assert on_disk["providers"]["openai"]["apiKey"] == "${ADMIN_TEST_OPENAI_KEY}"
+    assert on_disk["logging"]["level"] == "DEBUG"
+
+
+def test_admin_config_backups_route_lists_safe_backup_payloads(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+    service = channel._admin_service
+    assert service is not None
+    service.set_config("logging.level", "DEBUG")
+
+    response = channel._handle_admin_config_backups(_request())
+
+    assert response.status_code == 200
+    body = json.loads(response.body)
+    assert body["backups"]
+    backup = body["backups"][0]
+    assert {"id", "mtime_ms", "size_bytes", "source", "kind", "summary"} <= set(backup)
+    assert "/" not in backup["id"]
+    assert "path" not in backup
+
+
+async def test_admin_config_restore_backup_rpc_restores_config(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+    service = channel._admin_service
+    assert service is not None
+    service.set_config("logging.level", "DEBUG")
+    backup_id = service.config_backups()[0]["id"]
+    service.set_config("logging.level", "ERROR")
+    connection = MagicMock()
+    channel._admin_connections.add(connection)
+    channel._send_event = AsyncMock()
+
+    await channel._dispatch_envelope(
+        connection,
+        client_id="client-x",
+        envelope={
+            "type": "admin_config_restore_backup",
+            "request_id": "restore-1",
+            "backup_id": backup_id,
+        },
+    )
+
+    assert json.loads(service.config_path.read_text())["logging"]["level"] == "INFO"
+    channel._send_event.assert_awaited_with(
+        connection,
+        "admin_config_saved",
+        request_id="restore-1",
+        path="config.backup",
+        restart_required=True,
+    )
+
+
+async def test_admin_test_bind_rpc_returns_probe_result(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+    service = channel._admin_service
+    assert service is not None
+    service.test_bind = AsyncMock(return_value={"ok": True})
+    connection = MagicMock()
+    channel._admin_connections.add(connection)
+    channel._send_event = AsyncMock()
+
+    await channel._dispatch_envelope(
+        connection,
+        client_id="client-x",
+        envelope={
+            "type": "admin_test_bind",
+            "request_id": "bind-1",
+            "host": "127.0.0.1",
+            "port": 43210,
+        },
+    )
+
+    service.test_bind.assert_awaited_once_with("127.0.0.1", 43210)
+    channel._send_event.assert_awaited_with(
+        connection,
+        "admin_test_bind_result",
+        request_id="bind-1",
+        result={"ok": True},
+    )
+
+
+async def test_admin_test_bind_rpc_rate_limits_per_admin_connection(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+    service = channel._admin_service
+    assert service is not None
+    service.test_bind = AsyncMock(return_value={"ok": True})
+    connection = MagicMock()
+    channel._admin_connections.add(connection)
+    channel._send_event = AsyncMock()
+
+    for i in range(6):
+        await channel._dispatch_envelope(
+            connection,
+            client_id="client-x",
+            envelope={
+                "type": "admin_test_bind",
+                "request_id": f"bind-{i}",
+                "host": "127.0.0.1",
+                "port": 43210,
+            },
+        )
+
+    assert service.test_bind.await_count == 5
+    channel._send_event.assert_awaited_with(
+        connection,
+        "admin_test_bind_result",
+        request_id="bind-5",
+        result={"ok": False, "errno": "ERATELIMIT", "message": "Bind test rate limit exceeded"},
+    )
+
+
+async def test_admin_test_channel_rpc_returns_stable_check_order(tmp_path: Path) -> None:
+    cfg = Config.model_validate(
+        {"channels": {"telegram": {"enabled": True, "botToken": "telegram-token"}}}
+    )
+    channel, _ = _channel(tmp_path, cfg)
+    connection = MagicMock()
+    channel._admin_connections.add(connection)
+    channel._send_event = AsyncMock()
+
+    await channel._dispatch_envelope(
+        connection,
+        client_id="client-x",
+        envelope={"type": "admin_test_channel", "request_id": "chan-1", "name": "telegram"},
+    )
+
+    assert channel._send_event.await_args is not None
+    args, kwargs = channel._send_event.await_args
+    assert args[:2] == (connection, "admin_test_channel_result")
+    payload = kwargs["result"]
+    assert payload["checks"] == [
+        "channel_known",
+        "config_present",
+        "config_shape_valid",
+        "enabled_flag_valid",
+        "required_secrets_present",
+        "allow_from_posture",
+        "local_dependencies_present",
+    ]
+    assert payload["ok"] is True
+
+
+async def test_admin_mcp_probe_rpc_redacts_configured_server(tmp_path: Path) -> None:
+    cfg = Config.model_validate(
+        {"tools": {"mcpServers": {"local": {"command": "python", "args": ["-m", "server"]}}}}
+    )
+    channel, _ = _channel(tmp_path, cfg)
+    connection = MagicMock()
+    channel._admin_connections.add(connection)
+    channel._send_event = AsyncMock()
+
+    await channel._dispatch_envelope(
+        connection,
+        client_id="client-x",
+        envelope={"type": "admin_mcp_probe", "request_id": "mcp-1", "server": "local"},
+    )
+
+    channel._send_event.assert_awaited_with(
+        connection,
+        "admin_mcp_probe_result",
+        request_id="mcp-1",
+        result={"ok": True, "tools": [], "elapsed_ms": 0},
+    )
+
+
+async def test_admin_browser_probe_rpc_redacts_runtime_state(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+    service = channel._admin_service
+    assert service is not None
+    service._browser_status_provider = lambda: SimpleNamespace(
+        active_contexts=2,
+        last_url="https://example.com/private?token=secret#frag",
+        cookie_size_bytes=123,
+    )
+    connection = MagicMock()
+    channel._admin_connections.add(connection)
+    channel._send_event = AsyncMock()
+
+    await channel._dispatch_envelope(
+        connection,
+        client_id="client-x",
+        envelope={"type": "admin_browser_probe", "request_id": "browser-1"},
+    )
+
+    channel._send_event.assert_awaited_with(
+        connection,
+        "admin_browser_probe_result",
+        request_id="browser-1",
+        result={
+            "active_contexts": 2,
+            "last_url": "https://example.com/private",
+            "cookie_size_bytes": 123,
+        },
+    )

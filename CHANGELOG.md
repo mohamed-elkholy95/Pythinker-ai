@@ -25,9 +25,6 @@ All notable user-visible changes to Pythinker land here. The project follows
   `HH:MM:SS` leading column when the backing entry carries a `ts`,
   `time`, or `timestamp` field. Entries without a timestamp are
   unchanged.
-- **`SessionManager.load_existing(key)`** — a read-only counterpart to
-  `get_or_create` that returns `None` for unknown keys instead of
-  silently creating and persisting a blank session.
 
 ### Security
 

@@ -22,11 +22,22 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
+  cancelSubagent,
   fetchAdminSurfaces,
+  restartSession,
+  stopSession,
   type AdminLiveSession,
   type AdminSubagentStatus,
   type AdminSurfaces,
 } from "@/lib/admin-api";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { adminTabMeta, type AdminTabId } from "@/lib/admin-tabs";
 import { UsageView } from "@/components/admin/UsageView";
 import { ConfigWorkbench } from "@/components/admin/config/ConfigWorkbench";
@@ -233,13 +244,13 @@ function TabContent({
     case "channels":
       return <ChannelsView data={data} />;
     case "sessions":
-      return <SessionsView data={data} />;
+      return <SessionsView data={data} token={token} onRefresh={onRefresh} />;
     case "usage":
       return <UsageView data={data} />;
     case "cron":
       return <CronView data={data} />;
     case "agents":
-      return <AgentsView data={data} />;
+      return <AgentsView data={data} token={token} onRefresh={onRefresh} />;
     case "skills":
       return <SkillsView data={data} />;
     case "dreams":
@@ -347,18 +358,122 @@ function ChannelsView({ data }: { data: AdminSurfaces }) {
   );
 }
 
-function SessionsView({ data }: { data: AdminSurfaces }) {
+function SessionsView({
+  data,
+  token,
+  onRefresh,
+}: {
+  data: AdminSurfaces;
+  token: string;
+  onRefresh: () => Promise<void>;
+}) {
+  const [message, setMessage] = useState<string | null>(null);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [restartKey, setRestartKey] = useState<string | null>(null);
+
+  const runStop = useCallback(
+    async (key: string) => {
+      setBusyKey(key);
+      setMessage(null);
+      try {
+        const result = await stopSession(token, key);
+        setMessage(`Stopped ${key}: cancelled ${result.cancelled} task${result.cancelled === 1 ? "" : "s"}.`);
+        await onRefresh();
+      } catch (e) {
+        setMessage(`Stop failed: ${(e as Error).message}`);
+      } finally {
+        setBusyKey(null);
+      }
+    },
+    [token, onRefresh],
+  );
+
+  const runRestart = useCallback(
+    async (key: string) => {
+      setBusyKey(key);
+      setMessage(null);
+      setRestartKey(null);
+      try {
+        const result = await restartSession(token, key);
+        if (!result.found) {
+          setMessage(`Restart: session ${key} not found.`);
+        } else {
+          setMessage(
+            `Restarted ${key}: cancelled ${result.cancelled}, checkpoint ${
+              result.checkpoint_cleared ? "cleared" : "untouched"
+            }.`,
+          );
+        }
+        await onRefresh();
+      } catch (e) {
+        setMessage(`Restart failed: ${(e as Error).message}`);
+      } finally {
+        setBusyKey(null);
+      }
+    },
+    [token, onRefresh],
+  );
+
   return (
     <Panel title="Sessions" icon={<Database className="h-4 w-4" />}>
+      {message && (
+        <div className="mb-3 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs">
+          {message}
+        </div>
+      )}
       <Table
-        columns={["Session", "Channel", "Preview", "Usage"]}
+        columns={["Session", "Channel", "Preview", "Usage", "Actions"]}
         rows={data.sessions.sessions.map((session) => [
           session.key,
           session.channel,
           session.preview || session.title || "No preview",
           `${formatNumber(session.usage.used)} / ${formatNumber(session.usage.limit)}`,
+          <div key={`${session.key}-actions`} className="flex flex-wrap gap-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busyKey === session.key}
+              onClick={() => void runStop(session.key)}
+            >
+              Stop
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busyKey === session.key}
+              onClick={() => setRestartKey(session.key)}
+            >
+              Restart
+            </Button>
+          </div>,
         ])}
       />
+      <Dialog open={restartKey !== null} onOpenChange={(open) => !open && setRestartKey(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Restart session?</DialogTitle>
+            <DialogDescription>
+              Cancels any in-flight turn and clears the runtime checkpoint for{" "}
+              <span className="font-mono">{restartKey ?? ""}</span>. The next message
+              starts fresh from the persisted history.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setRestartKey(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => restartKey && void runRestart(restartKey)}
+            >
+              Restart
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Panel>
   );
 }
@@ -388,7 +503,15 @@ function CronView({ data }: { data: AdminSurfaces }) {
   );
 }
 
-function AgentsView({ data }: { data: AdminSurfaces }) {
+function AgentsView({
+  data,
+  token,
+  onRefresh,
+}: {
+  data: AdminSurfaces;
+  token: string;
+  onRefresh: () => Promise<void>;
+}) {
   const liveSessions = data.agents.live?.sessions ?? [];
   return (
     <div className="space-y-4">
@@ -413,7 +536,7 @@ function AgentsView({ data }: { data: AdminSurfaces }) {
           />
         </div>
       </Panel>
-      <LiveAgentsPanel sessions={liveSessions} />
+      <LiveAgentsPanel sessions={liveSessions} token={token} onRefresh={onRefresh} />
     </div>
   );
 }
@@ -444,9 +567,46 @@ function summarizePhases(rows: AdminSubagentStatus[]): string {
     .join(", ");
 }
 
-function LiveAgentsPanel({ sessions }: { sessions: AdminLiveSession[] }) {
+function LiveAgentsPanel({
+  sessions,
+  token,
+  onRefresh,
+}: {
+  sessions: AdminLiveSession[];
+  token: string;
+  onRefresh: () => Promise<void>;
+}) {
+  const [message, setMessage] = useState<string | null>(null);
+  const [busyTask, setBusyTask] = useState<string | null>(null);
+
+  const runCancel = useCallback(
+    async (taskId: string) => {
+      setBusyTask(taskId);
+      setMessage(null);
+      try {
+        const result = await cancelSubagent(token, taskId);
+        setMessage(
+          result.cancelled
+            ? `Cancelled subagent ${taskId}.`
+            : `Subagent ${taskId} was already done.`,
+        );
+        await onRefresh();
+      } catch (e) {
+        setMessage(`Cancel failed: ${(e as Error).message}`);
+      } finally {
+        setBusyTask(null);
+      }
+    },
+    [token, onRefresh],
+  );
+
   return (
     <Panel title="Live agents" icon={<Activity className="h-4 w-4" />}>
+      {message && (
+        <div className="mb-3 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs">
+          {message}
+        </div>
+      )}
       {sessions.length === 0 ? (
         <p className="text-sm text-muted-foreground">No active agents.</p>
       ) : (
@@ -481,13 +641,23 @@ function LiveAgentsPanel({ sessions }: { sessions: AdminLiveSession[] }) {
               {session.subagents.length > 0 && (
                 <div className="mt-2">
                   <Table
-                    columns={["Label", "Phase", "Iter.", "Elapsed", "Last tool"]}
+                    columns={["Label", "Phase", "Iter.", "Elapsed", "Last tool", "Action"]}
                     rows={session.subagents.map((sub) => [
                       sub.label,
                       sub.phase,
                       String(sub.iteration),
                       formatElapsed(sub.elapsed_s),
                       stringify(sub.tool_events.at(-1)?.name) || "—",
+                      <Button
+                        key={`${sub.task_id}-cancel`}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={busyTask === sub.task_id}
+                        onClick={() => void runCancel(sub.task_id)}
+                      >
+                        Cancel
+                      </Button>,
                     ])}
                   />
                 </div>

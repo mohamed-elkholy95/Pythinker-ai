@@ -448,6 +448,127 @@ async def test_admin_mcp_probe_rpc_redacts_configured_server(tmp_path: Path) -> 
     )
 
 
+def _admin_request(
+    path: str,
+    *,
+    token: str | None = "tok",
+    csrf: bool = True,
+) -> MagicMock:
+    req = MagicMock()
+    req.path = path
+    headers: dict[str, str] = {}
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
+    if csrf:
+        headers["X-Pythinker-Admin-Action"] = "1"
+    req.headers = headers
+    return req
+
+
+async def test_admin_session_stop_requires_token(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+    response = await channel._handle_admin_session_stop(
+        _admin_request("/api/admin/sessions/k/stop", token=None), "k"
+    )
+    assert response.status_code == 401
+
+
+async def test_admin_session_stop_requires_csrf_header(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+    response = await channel._handle_admin_session_stop(
+        _admin_request("/api/admin/sessions/k/stop", csrf=False), "k"
+    )
+    assert response.status_code == 403
+
+
+async def test_admin_session_stop_cancels_and_returns_count(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+    service = channel._admin_service
+    assert service is not None
+    service.agent_loop._cancel_active_tasks = AsyncMock(return_value=3)
+
+    response = await channel._handle_admin_session_stop(
+        _admin_request("/api/admin/sessions/key/stop"), "key"
+    )
+    assert response.status_code == 200
+    body = json.loads(response.body)
+    assert body == {"cancelled": 3}
+    service.agent_loop._cancel_active_tasks.assert_awaited_once_with("key")
+
+
+async def test_admin_session_restart_clears_checkpoint_when_session_exists(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+    service = channel._admin_service
+    assert service is not None
+    loop = service.agent_loop
+    loop._cancel_active_tasks = AsyncMock(return_value=1)
+    loop._clear_runtime_checkpoint = MagicMock()
+    loop._clear_pending_user_turn = MagicMock()
+
+    response = await channel._handle_admin_session_restart(
+        _admin_request("/api/admin/sessions/websocket:browser/restart"), "websocket:browser"
+    )
+    assert response.status_code == 200
+    body = json.loads(response.body)
+    assert body["cancelled"] == 1
+    assert body["found"] is True
+    assert body["checkpoint_cleared"] is True
+    loop._clear_runtime_checkpoint.assert_called_once()
+    loop._clear_pending_user_turn.assert_called_once()
+
+
+async def test_admin_session_restart_does_not_create_session_for_unknown_key(tmp_path: Path) -> None:
+    channel, cfg = _channel(tmp_path)
+    service = channel._admin_service
+    assert service is not None
+    loop = service.agent_loop
+    loop._cancel_active_tasks = AsyncMock(return_value=0)
+    loop._clear_runtime_checkpoint = MagicMock()
+    loop._clear_pending_user_turn = MagicMock()
+
+    response = await channel._handle_admin_session_restart(
+        _admin_request("/api/admin/sessions/missing/restart"), "missing"
+    )
+    assert response.status_code == 200
+    body = json.loads(response.body)
+    assert body == {"cancelled": 0, "checkpoint_cleared": False, "found": False}
+    loop._clear_runtime_checkpoint.assert_not_called()
+    sessions_dir = cfg.workspace_path / "sessions"
+    if sessions_dir.exists():
+        assert not (sessions_dir / "missing.jsonl").exists()
+
+
+async def test_admin_subagent_cancel_dispatches_to_manager(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+    service = channel._admin_service
+    assert service is not None
+    sub_mgr = MagicMock()
+    sub_mgr.cancel_task = AsyncMock(return_value=True)
+    service.agent_loop.subagents = sub_mgr
+
+    response = await channel._handle_admin_subagent_cancel(
+        _admin_request("/api/admin/subagents/abc/cancel"), "abc"
+    )
+    assert response.status_code == 200
+    assert json.loads(response.body) == {"cancelled": True}
+    sub_mgr.cancel_task.assert_awaited_once_with("abc")
+
+
+async def test_admin_subagent_cancel_returns_false_when_unknown(tmp_path: Path) -> None:
+    channel, _ = _channel(tmp_path)
+    service = channel._admin_service
+    assert service is not None
+    sub_mgr = MagicMock()
+    sub_mgr.cancel_task = AsyncMock(return_value=False)
+    service.agent_loop.subagents = sub_mgr
+
+    response = await channel._handle_admin_subagent_cancel(
+        _admin_request("/api/admin/subagents/nope/cancel"), "nope"
+    )
+    assert response.status_code == 200
+    assert json.loads(response.body) == {"cancelled": False}
+
+
 def test_admin_agents_surface_includes_live_sessions(tmp_path: Path) -> None:
     """`agents().live` reports in-flight turns and subagent statuses, with stale empty keys filtered."""
     import time as _time

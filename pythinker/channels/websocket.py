@@ -623,6 +623,18 @@ class WebSocketChannel(BaseChannel):
         if got == "/api/admin/config/backups":
             return self._handle_admin_config_backups(request)
 
+        m = re.match(r"^/api/admin/sessions/([^/]+)/stop$", got)
+        if m:
+            return await self._handle_admin_session_stop(request, m.group(1))
+
+        m = re.match(r"^/api/admin/sessions/([^/]+)/restart$", got)
+        if m:
+            return await self._handle_admin_session_restart(request, m.group(1))
+
+        m = re.match(r"^/api/admin/subagents/([^/]+)/cancel$", got)
+        if m:
+            return await self._handle_admin_subagent_cancel(request, m.group(1))
+
         # Signed media fetch: ``<sig>`` is an HMAC over ``<payload>``; the
         # payload decodes to a path inside :func:`get_media_dir`. See
         # :meth:`_sign_media_path` for the inverse direction used to build
@@ -1060,6 +1072,95 @@ class WebSocketChannel(BaseChannel):
             request,
             lambda: {"backups": self._admin_service.config_backups()},
         )
+
+    # -- Admin mutations (token + custom-header gate) ----------------------
+    #
+    # The websockets HTTP parser is GET-only, so mutating verbs are folded
+    # into the path (mirroring ``/api/sessions/<key>/pin|archive|delete``).
+    # CSRF defense is the required ``X-Pythinker-Admin-Action: 1`` header —
+    # cross-site browser tabs can fire GETs from <img>/<form> but cannot set
+    # arbitrary request headers without a CORS preflight that the server
+    # never answers, so the header alone defeats drive-by writes for the
+    # localhost-only personal deployment posture this project targets.
+
+    _ADMIN_ACTION_HEADER = "X-Pythinker-Admin-Action"
+
+    def _check_admin_mutation(
+        self, request: WsRequest, *, route: str, key: str
+    ) -> Response | None:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        headers = getattr(request, "headers", None) or {}
+        try:
+            header_value = (headers.get(self._ADMIN_ACTION_HEADER) or "").strip()
+        except AttributeError:
+            header_value = ""
+        if header_value != "1":
+            return _http_error(403, "Missing admin action header")
+        logger.info("admin_mutation route={} key={}", route, key)
+        return None
+
+    async def _handle_admin_session_stop(self, request: WsRequest, key: str) -> Response:
+        rejection = self._check_admin_mutation(request, route="session_stop", key=key)
+        if rejection is not None:
+            return rejection
+        if self._admin_service is None or self._admin_service.agent_loop is None:
+            return _http_error(503, "agent loop unavailable")
+        try:
+            cancelled = await self._admin_service.agent_loop._cancel_active_tasks(key)
+        except Exception:
+            logger.exception("admin session_stop failed for key=%s", key)
+            return _http_error(500, "stop failed")
+        return _http_json_response({"cancelled": int(cancelled)})
+
+    async def _handle_admin_session_restart(self, request: WsRequest, key: str) -> Response:
+        rejection = self._check_admin_mutation(request, route="session_restart", key=key)
+        if rejection is not None:
+            return rejection
+        if self._admin_service is None or self._admin_service.agent_loop is None:
+            return _http_error(503, "agent loop unavailable")
+        loop = self._admin_service.agent_loop
+        sm = self._admin_service.session_manager
+        try:
+            cancelled = await loop._cancel_active_tasks(key)
+        except Exception:
+            logger.exception("admin session_restart cancel failed for key=%s", key)
+            return _http_error(500, "restart failed")
+        # Use load_existing — get_or_create would silently materialise a
+        # blank session for a mistyped key and persist it on the next save.
+        session = sm.load_existing(key) if sm is not None else None
+        cleared = False
+        if session is not None:
+            try:
+                loop._clear_runtime_checkpoint(session)
+                loop._clear_pending_user_turn(session)
+                sm.save(session)
+                cleared = True
+            except Exception:
+                logger.exception("admin session_restart save failed for key=%s", key)
+        return _http_json_response(
+            {
+                "cancelled": int(cancelled),
+                "checkpoint_cleared": cleared,
+                "found": session is not None,
+            }
+        )
+
+    async def _handle_admin_subagent_cancel(self, request: WsRequest, task_id: str) -> Response:
+        rejection = self._check_admin_mutation(request, route="subagent_cancel", key=task_id)
+        if rejection is not None:
+            return rejection
+        if self._admin_service is None or self._admin_service.agent_loop is None:
+            return _http_error(503, "agent loop unavailable")
+        sub_mgr = getattr(self._admin_service.agent_loop, "subagents", None)
+        if sub_mgr is None:
+            return _http_error(503, "subagent manager unavailable")
+        try:
+            cancelled = await sub_mgr.cancel_task(task_id)
+        except Exception:
+            logger.exception("admin subagent_cancel failed for task_id=%s", task_id)
+            return _http_error(500, "cancel failed")
+        return _http_json_response({"cancelled": bool(cancelled)})
 
     def _handle_search(self, request: WsRequest) -> Response:
         """Cross-chat substring search; paginated ``{results, offset, limit, has_more}``."""

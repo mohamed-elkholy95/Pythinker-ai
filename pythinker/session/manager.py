@@ -163,6 +163,19 @@ class SessionManager:
         self._evict_if_full()
         return session
 
+    def load_existing(self, key: str) -> Session | None:
+        """Return the session for *key* if it exists in cache or on disk; else None.
+
+        Read-only counterpart to :meth:`get_or_create`. Used by admin tools that
+        must distinguish "this session exists" from "this session does not" —
+        ``get_or_create`` would silently materialise an empty session for a
+        mistyped key and persist it on the next save.
+        """
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key]
+        return self._load(key)
+
     def _evict_if_full(self) -> None:
         while len(self._cache) > self._cache_max:
             evicted_key, _ = self._cache.popitem(last=False)

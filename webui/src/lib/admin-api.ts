@@ -11,6 +11,11 @@ async function request<T>(
     headers: {
       ...(init?.headers ?? {}),
       Authorization: `Bearer ${token}`,
+      // CSRF guard for admin write endpoints. The backend requires this on
+      // every mutating route; reads ignore it. Cross-site HTML can fire
+      // GETs but cannot set custom headers without a CORS preflight, so
+      // this single header defeats drive-by writes from other tabs.
+      "X-Pythinker-Admin-Action": "1",
     },
     credentials: "same-origin",
   });
@@ -242,4 +247,52 @@ export async function fetchAdminConfigBackups(
 
 export async function fetchAdminSurfaces(token: string): Promise<AdminSurfaces> {
   return request<AdminSurfaces>("/api/admin/surfaces", token);
+}
+
+// -- Admin mutations ------------------------------------------------------
+// Action-in-path GET routes (the websockets HTTP parser is GET-only, so the
+// verb is folded into the URL — the backend reads the path, not the method).
+
+export interface StopSessionResult {
+  cancelled: number;
+}
+
+export interface RestartSessionResult {
+  cancelled: number;
+  checkpoint_cleared: boolean;
+  found: boolean;
+}
+
+export interface CancelSubagentResult {
+  cancelled: boolean;
+}
+
+export async function stopSession(
+  token: string,
+  key: string,
+): Promise<StopSessionResult> {
+  return request<StopSessionResult>(
+    `/api/admin/sessions/${encodeURIComponent(key)}/stop`,
+    token,
+  );
+}
+
+export async function restartSession(
+  token: string,
+  key: string,
+): Promise<RestartSessionResult> {
+  return request<RestartSessionResult>(
+    `/api/admin/sessions/${encodeURIComponent(key)}/restart`,
+    token,
+  );
+}
+
+export async function cancelSubagent(
+  token: string,
+  taskId: string,
+): Promise<CancelSubagentResult> {
+  return request<CancelSubagentResult>(
+    `/api/admin/subagents/${encodeURIComponent(taskId)}/cancel`,
+    token,
+  );
 }

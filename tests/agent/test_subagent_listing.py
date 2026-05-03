@@ -67,3 +67,52 @@ def test_list_statuses_unbound_session(tmp_path):
     rows = mgr.list_statuses()
     assert len(rows) == 1
     assert rows[0]["session_key"] == ""
+
+
+import asyncio  # noqa: E402
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_cancel_task_returns_false_for_unknown(tmp_path):
+    mgr = _manager(tmp_path)
+    assert await mgr.cancel_task("does-not-exist") is False
+
+
+@pytest.mark.asyncio
+async def test_cancel_task_cancels_running_task(tmp_path):
+    mgr = _manager(tmp_path)
+
+    async def _slow():
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            raise
+
+    task = asyncio.create_task(_slow())
+    mgr._running_tasks["t1"] = task
+    mgr._task_statuses["t1"] = SubagentStatus(
+        task_id="t1",
+        label="dummy",
+        task_description="x",
+        started_at=time.monotonic(),
+    )
+    mgr._session_tasks["s:1"] = {"t1"}
+
+    cancelled = await mgr.cancel_task("t1")
+    assert cancelled is True
+    assert task.cancelled() or task.done()
+
+
+@pytest.mark.asyncio
+async def test_cancel_task_returns_false_for_done_task(tmp_path):
+    mgr = _manager(tmp_path)
+
+    async def _quick():
+        return "ok"
+
+    task = asyncio.create_task(_quick())
+    await task  # let it finish
+    mgr._running_tasks["t2"] = task
+    assert await mgr.cancel_task("t2") is False

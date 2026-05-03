@@ -382,6 +382,23 @@ class SubagentManager:
             skills_summary=skills_summary or "",
         )
 
+    async def cancel_task(self, task_id: str) -> bool:
+        """Cancel one subagent by ``task_id``. Returns True if cancelled.
+
+        Returns False if the task is unknown or already done. Cleanup of
+        ``_task_statuses`` / ``_session_tasks`` is handled by the existing
+        done-callback registered in :meth:`spawn`.
+        """
+        task = self._running_tasks.get(task_id)
+        if task is None or task.done():
+            return False
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+        return True
+
     async def cancel_by_session(self, session_key: str) -> int:
         """Cancel all subagents for the given session. Returns count cancelled."""
         tasks = [self._running_tasks[tid] for tid in self._session_tasks.get(session_key, [])

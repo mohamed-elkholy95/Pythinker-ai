@@ -1,10 +1,17 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminDashboard, type AdminTabId } from "@/components/admin/AdminDashboard";
 import { ClientProvider } from "@/providers/ClientProvider";
 
 vi.mock("@/lib/admin-api", () => ({
+  stopSession: vi.fn(async () => ({ cancelled: 1 })),
+  restartSession: vi.fn(async () => ({
+    cancelled: 1,
+    checkpoint_cleared: true,
+    found: true,
+  })),
+  cancelSubagent: vi.fn(async () => ({ cancelled: true })),
   fetchAdminOverview: vi.fn(async () => ({
     version: "0.1.0",
     uptime_s: 42,
@@ -257,6 +264,49 @@ describe("AdminDashboard", () => {
     });
     renderDashboard("agents");
     expect(await screen.findByText("No active agents.")).toBeInTheDocument();
+  });
+
+  it("stops a session via the per-row Stop button", async () => {
+    const { stopSession } = await import("@/lib/admin-api");
+    const stop = vi.mocked(stopSession);
+    stop.mockClear();
+
+    renderDashboard("sessions");
+    const stopBtn = await screen.findByRole("button", { name: /^stop$/i });
+    fireEvent.click(stopBtn);
+
+    await waitFor(() => expect(stop).toHaveBeenCalledWith("tok", "slack:C123"));
+    expect(await screen.findByText(/Stopped slack:C123/)).toBeInTheDocument();
+  });
+
+  it("confirms a restart via dialog before calling the route", async () => {
+    const { restartSession } = await import("@/lib/admin-api");
+    const restart = vi.mocked(restartSession);
+    restart.mockClear();
+
+    renderDashboard("sessions");
+    const restartTrigger = await screen.findByRole("button", { name: /^restart$/i });
+    fireEvent.click(restartTrigger);
+
+    // Dialog confirm step
+    const dialog = await screen.findByRole("dialog");
+    const confirm = within(dialog).getByRole("button", { name: /^restart$/i });
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(restart).toHaveBeenCalledWith("tok", "slack:C123"));
+  });
+
+  it("cancels a subagent via the per-row Cancel button", async () => {
+    const { cancelSubagent } = await import("@/lib/admin-api");
+    const cancel = vi.mocked(cancelSubagent);
+    cancel.mockClear();
+
+    renderDashboard("agents");
+    const cancelBtn = await screen.findByRole("button", { name: /^cancel$/i });
+    fireEvent.click(cancelBtn);
+
+    await waitFor(() => expect(cancel).toHaveBeenCalledWith("tok", "abc12345"));
+    expect(await screen.findByText(/Cancelled subagent abc12345/)).toBeInTheDocument();
   });
 
   it("renders infrastructure as a structured key-value panel, not raw JSON", async () => {

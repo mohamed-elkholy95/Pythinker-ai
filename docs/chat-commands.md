@@ -8,12 +8,21 @@ These commands work inside chat channels and interactive agent sessions:
 | `/stop` | Stop the current task |
 | `/restart` | Restart the bot |
 | `/status` | Show bot status |
+| `/tasks` | List active and recent autonomous tasks for this session |
+| `/task-output <task_id>` | Show the latest output tail for a task |
+| `/task-stop <task_id>` | Stop a running task by id |
 | `/dream` | Run Dream memory consolidation now |
 | `/dream-log` | Show the latest Dream memory change |
 | `/dream-log <sha>` | Show a specific Dream memory change |
 | `/dream-restore` | List recent Dream memory versions |
 | `/dream-restore <sha>` | Restore memory to the state before a specific change |
 | `/help` | Show available in-chat commands |
+
+## Autonomous Tasks
+
+Subagents are tracked as autonomous tasks. Use `/tasks` to see active and recent work, `/task-output <task_id>` to inspect the latest saved output, and `/task-stop <task_id>` to cancel a running subagent.
+
+Task output is stored under the workspace's `.pythinker/task-results/` directory and exposed through bounded chat output so large results do not flood the conversation.
 
 ## Periodic Tasks
 

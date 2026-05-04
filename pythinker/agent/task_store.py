@@ -22,6 +22,13 @@ class TaskStore:
 
     Single-user, local-only. On restart the registry starts empty; surviving
     output files are loaded as orphans so `/task-output <id>` keeps working.
+    Orphaned records have no owning session — they are readable from any
+    chat session in the same workspace, which is fine for the intended
+    single-user/local deployment but explicitly bypasses same-session scoping.
+
+    To bound disk usage, terminal records evicted past ``max_recent`` (default
+    200) have their output file unlinked. Reusing a ``task_id`` likewise
+    truncates the prior output before the new task begins.
     """
 
     def __init__(self, workspace: Path | str, max_recent: int = 200) -> None:
@@ -63,17 +70,22 @@ class TaskStore:
             )
         else:
             self._unindex_session(record)
+            self._unlink_output(task_id)
             record.type = task_type
             record.label = label
             record.description = description
             record.session_key = session_key
             record.status = "running"
+            record.started_at = now
             record.updated_at = now
             record.ended_at = None
             record.tool_use_id = tool_use_id
+            record.output_uri = None
+            record.output_offset = 0
             record.stop_reason = None
             record.error = None
-            record.recent_activity = record.recent_activity or []
+            record.recent_activity = []
+            record.usage = None
         self._records[task_id] = record
         self._index_session(record)
         self._trim_recent()
@@ -226,6 +238,16 @@ class TaskStore:
             if record.status in _TERMINAL_STATUSES:
                 self._records.pop(record.task_id, None)
                 self._unindex_session(record)
+                self._unlink_output(record.task_id)
+
+    def _unlink_output(self, task_id: str) -> None:
+        if not _is_safe_task_id(task_id):
+            return
+        path = self._output_path(task_id)
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
 
     def _index_session(self, record: TaskRecord) -> None:
         if record.session_key:

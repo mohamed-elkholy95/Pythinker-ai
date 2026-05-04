@@ -22,7 +22,9 @@ These commands work inside chat channels and interactive agent sessions:
 
 Subagents are tracked as autonomous tasks. Use `/tasks` to see active and recent work, `/task-output <task_id>` to inspect the latest saved output, and `/task-stop <task_id>` to cancel a running subagent.
 
-Task output is stored under the workspace's `.pythinker/task-results/` directory and exposed through bounded chat output so large results do not flood the conversation.
+Task output is stored under the workspace's `.pythinker/task-results/` directory and exposed through bounded chat output so large results do not flood the conversation. The store keeps the most recent ~200 terminal records — older terminal output files are unlinked automatically as new tasks finish.
+
+In-memory task records are scoped to the originating chat session: `/tasks`, `/task-stop`, and `/task-output` only see tasks from the session they were issued in. The one exception is restart recovery — surviving output files left under `.pythinker/task-results/` are reloaded as ownerless "orphaned" records and `/task-output <task_id>` can read them from any session. That's the intended behavior for Pythinker's single-user/local deployment; if you run Pythinker as a shared service, treat task output as workspace-wide rather than session-private.
 
 ## Periodic Tasks
 

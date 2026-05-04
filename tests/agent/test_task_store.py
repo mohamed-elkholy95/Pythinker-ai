@@ -259,6 +259,61 @@ def test_orphaned_outputs_are_loaded_on_startup(tmp_path: Path) -> None:
     assert store.read_output("a_existing", max_chars=100).content == "saved output"
 
 
+def test_reusing_task_id_truncates_prior_output(tmp_path: Path) -> None:
+    store = TaskStore(tmp_path)
+    first = store.start_task(
+        task_type="subagent",
+        label="first",
+        description="old",
+        session_key="s:1",
+        task_id="a_reuse",
+    )
+    store.append_output(first.task_id, "OLD-OUTPUT")
+    store.finish_task(first.task_id, status="completed")
+
+    second = store.start_task(
+        task_type="subagent",
+        label="second",
+        description="new",
+        session_key="s:1",
+        task_id="a_reuse",
+    )
+
+    assert second.output_uri is None
+    assert second.output_offset == 0
+    assert store.read_output(second.task_id).error == "task output not found"
+
+    store.append_output(second.task_id, "NEW")
+    output = store.read_output(second.task_id)
+    assert output.content == "NEW"
+
+
+def test_trim_removes_output_file_for_evicted_terminal_record(tmp_path: Path) -> None:
+    store = TaskStore(tmp_path, max_recent=1)
+    first = store.start_task(
+        task_type="subagent",
+        label="first",
+        description="first",
+        session_key="s:1",
+        task_id="a_first",
+    )
+    store.append_output(first.task_id, "first output")
+    store.finish_task(first.task_id, status="completed")
+    second = store.start_task(
+        task_type="subagent",
+        label="second",
+        description="second",
+        session_key="s:1",
+        task_id="a_second",
+    )
+    store.append_output(second.task_id, "second output")
+    store.finish_task(second.task_id, status="completed")
+
+    assert store.get("a_first") is None
+    assert not (tmp_path / ".pythinker" / "task-results" / "a_first.txt").exists()
+    assert (tmp_path / ".pythinker" / "task-results" / "a_second.txt").exists()
+
+
 def test_orphaned_outputs_trim_keeps_newest_by_mtime(tmp_path: Path) -> None:
     import os
 

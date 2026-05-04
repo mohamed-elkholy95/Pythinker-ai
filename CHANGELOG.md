@@ -8,6 +8,14 @@ All notable user-visible changes to Pythinker land here. The project follows
 
 ### Added
 
+- **Autonomous task spine.** Subagents are now tracked as first-class
+  task records with durable per-task output files under
+  `.pythinker/task-results/`. Three new chat commands let you observe
+  and steer them: `/tasks` lists active and recent tasks for the current
+  session, `/task-output <task_id>` shows the latest bounded output
+  tail, and `/task-stop <task_id>` cancels a running task by id. Output
+  files survive process restarts and can be re-read after a crash via
+  `/task-output`.
 - **WebUI admin: live agent + subagent panel.** The Agents tab now shows,
   for each session, whether a turn is in flight and any spawned
   subagents — with phase, iteration, elapsed time, and the last tool

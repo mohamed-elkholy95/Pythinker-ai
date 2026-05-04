@@ -36,6 +36,17 @@ BUILTIN_COMMAND_METADATA: tuple[CommandMeta, ...] = (
     CommandMeta("/stop", "Stop the current task"),
     CommandMeta("/restart", "Restart the bot"),
     CommandMeta("/status", "Show bot status"),
+    CommandMeta("/tasks", "List active and recent autonomous tasks"),
+    CommandMeta(
+        "/task-output",
+        "Show the latest output for a task",
+        usage="/task-output <task_id>",
+    ),
+    CommandMeta(
+        "/task-stop",
+        "Stop a running task by id",
+        usage="/task-stop <task_id>",
+    ),
     CommandMeta(
         "/regenerate",
         "Drop the last assistant turn and re-run the prior user message",

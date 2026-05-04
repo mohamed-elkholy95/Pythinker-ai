@@ -158,8 +158,10 @@ class TaskStore:
         if record is None:
             return None
         path = self._output_path(task_id)
-        with path.open("a", encoding="utf-8") as f:
-            f.write(content)
+        # Binary mode: text mode on Windows translates "\n" → "\r\n", which
+        # then disagrees with the byte-exact tail read in read_output.
+        with path.open("ab") as f:
+            f.write(content.encode("utf-8"))
         record.output_uri = self._output_uri(task_id)
         record.output_offset = path.stat().st_size
         record.updated_at = utc_now_iso()
@@ -209,12 +211,20 @@ class TaskStore:
         return sorted(records, key=lambda r: r.updated_at, reverse=True)
 
     def _load_orphaned_outputs(self) -> None:
-        for path in sorted(self.output_dir.glob("*.txt")):
-            task_id = path.stem
-            if not _is_safe_task_id(task_id) or not path.is_file():
+        # Sort by mtime ascending so that the in-memory dict's insertion order
+        # matches "oldest first → newest last". `_trim_recent` evicts from the
+        # head of insertion order, so the newest output survives a startup
+        # trim regardless of filename ordering or clock-resolution ties.
+        candidates: list[tuple[float, Path]] = []
+        for path in self.output_dir.glob("*.txt"):
+            if not _is_safe_task_id(path.stem) or not path.is_file():
                 continue
+            candidates.append((path.stat().st_mtime, path))
+        candidates.sort(key=lambda item: (item[0], item[1].name))
+        for mtime, path in candidates:
+            task_id = path.stem
             stat = path.stat()
-            ts = datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat()
+            ts = datetime.fromtimestamp(mtime, tz=UTC).isoformat()
             self._records[task_id] = TaskRecord(
                 task_id=task_id,
                 type="subagent",
@@ -232,13 +242,21 @@ class TaskStore:
         self._trim_recent()
 
     def _trim_recent(self) -> None:
-        if len(self._records) <= self.max_recent:
+        # LRU by dict insertion order — drop oldest terminal records first.
+        # Avoids relying on `updated_at` for ordering, which on Windows can
+        # tie when consecutive finish_task calls land in the same clock tick.
+        excess = len(self._records) - self.max_recent
+        if excess <= 0:
             return
-        for record in self.list_records()[self.max_recent :]:
+        for task_id in list(self._records):
+            if excess <= 0:
+                break
+            record = self._records[task_id]
             if record.status in _TERMINAL_STATUSES:
-                self._records.pop(record.task_id, None)
+                self._records.pop(task_id, None)
                 self._unindex_session(record)
-                self._unlink_output(record.task_id)
+                self._unlink_output(task_id)
+                excess -= 1
 
     def _unlink_output(self, task_id: str) -> None:
         if not _is_safe_task_id(task_id):

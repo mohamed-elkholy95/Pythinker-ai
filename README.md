@@ -26,6 +26,7 @@
 - **Provider hot-reload** — edits to model / provider / API key in `~/.pythinker/config.json` land at the next turn boundary. No restart of the SDK or gateway. Same-signature snapshots short-circuit; broken configs are logged and swallowed so an in-flight session can't crash on a typo.
 - **Headless browser tool** *(opt-in)* — drives Playwright-managed Chromium for JavaScript-rendered pages, click/form flows, screenshots, and DOM snapshots. `mode="auto"` launches a packaged headless Chromium without Docker; `mode="cdp"` connects to an external service for hardened deployments. First-use Chromium binary installs lazily, with idle eviction, per-context page caps, SSRF route handling, and turn-boundary hot reload of browser config.
 - **Governed-execution runtime** *(off by default)* — opt-in `RuntimeConfig` wires a `PolicyService` (allow-lists from agent manifests, per-turn budgets, recursion depth), a `ToolEgressGateway` chokepoint, an `AgentRegistry` directory loader, `RequestContext` + `BudgetCounters` plumbing, and a pluggable `TelemetrySink` (loguru / JSONL / composite). When the loader is `None` and policy is off, the runtime is bit-for-bit identical to the legacy path.
+- **Autonomous subagent tracking** — spawned subagents are first-class task records with durable output under `.pythinker/task-results/`. Use `/tasks`, `/task-output <task_id>`, and `/task-stop <task_id>` to inspect or stop background work from chat.
 - **Memory that learns** — a two-phase "Dream" process consolidates long-term memory into `MEMORY.md` / `SOUL.md` / `USER.md`, auto-versioned with pure-Python git.
 - **Skills & MCP** — bundled skills (GitHub, cron, weather, tmux, summarize, skill-creator, …) plus first-class [Model Context Protocol](https://modelcontextprotocol.io/) tool access.
 - **Research-grade PDF reports** — opt-in `make_pdf` tool renders structured Markdown to a styled PDF via ReportLab (`pip install 'pythinker-ai[reports]'`).
@@ -186,6 +187,18 @@ pythinker tui                               # full-screen interactive chat (alia
 - Want to run Pythinker in chat apps like Telegram, Discord, Slack, WhatsApp, or Matrix? See [Chat Apps](https://github.com/mohamed-elkholy95/Pythinker-ai/blob/main/docs/chat-apps.md).
 - Want Docker or Linux service deployment? See [Deployment](https://github.com/mohamed-elkholy95/Pythinker-ai/blob/main/docs/deployment.md).
 - Want governed-execution (policy allow-lists, budgets, telemetry) for hardened deployments? See [Architecture §5.X — `pythinker/runtime/`](https://github.com/mohamed-elkholy95/Pythinker-ai/blob/main/docs/ARCHITECTURE.md). The layer is opt-in via `runtime.policyEnabled` in `config.json`.
+
+## 🧠 Agent Runtime Controls
+
+Pythinker can launch subagents for background coding, research, and maintenance work. The runtime now tracks those subagents as autonomous tasks instead of relying on chat text alone.
+
+| Command | What it does |
+|---|---|
+| `/tasks` | List active and recent autonomous tasks for the current session |
+| `/task-output <task_id>` | Show the latest bounded output tail for a task |
+| `/task-stop <task_id>` | Cancel a running subagent by id |
+
+Task output is written to `.pythinker/task-results/`, so large results do not flood the conversation and recovered output can still be inspected after a process restart. In-memory records are session-scoped; restart-recovered orphan output is workspace-wide by design for Pythinker's single-user/local deployment model.
 
 ## 🖥️ TUI
 

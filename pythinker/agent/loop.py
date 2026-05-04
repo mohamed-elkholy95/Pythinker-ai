@@ -20,6 +20,7 @@ from pythinker.agent.memory import Consolidator, Dream
 from pythinker.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from pythinker.agent.skills import BUILTIN_SKILLS_DIR
 from pythinker.agent.subagent import SubagentManager
+from pythinker.agent.task_store import TaskStore
 from pythinker.agent.tools.cron import CronTool
 from pythinker.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from pythinker.agent.tools.message import MessageTool
@@ -316,6 +317,7 @@ class AgentLoop:
         )
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
+        self.task_store = TaskStore(self.workspace)
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
@@ -327,6 +329,7 @@ class AgentLoop:
             restrict_to_workspace=restrict_to_workspace,
             disabled_skills=disabled_skills,
             max_recursion_depth=self._runtime_config.max_subagent_recursion_depth,
+            task_store=self.task_store,
         )
         self._unified_session = unified_session
         self._running = False

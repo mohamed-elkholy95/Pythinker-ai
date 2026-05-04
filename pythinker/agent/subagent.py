@@ -3,7 +3,6 @@
 import asyncio
 import json
 import time
-import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +13,7 @@ from loguru import logger
 from pythinker.agent.hook import AgentHook, AgentHookContext
 from pythinker.agent.runner import AgentRunner, AgentRunSpec
 from pythinker.agent.skills import BUILTIN_SKILLS_DIR
+from pythinker.agent.task_store import TaskStore
 from pythinker.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from pythinker.agent.tools.registry import ToolRegistry
 from pythinker.agent.tools.search import GlobTool, GrepTool
@@ -28,6 +28,9 @@ from pythinker.utils.prompt_templates import render_template
 if TYPE_CHECKING:
     from pythinker.agent.runner import EgressGateway
     from pythinker.runtime.context import RequestContext
+
+
+_TASK_STORE_TERMINAL_STATUSES = {"completed", "failed", "cancelled", "orphaned"}
 
 
 @dataclass(slots=True)
@@ -51,10 +54,16 @@ class SubagentStatus:
 class _SubagentHook(AgentHook):
     """Hook for subagent execution — logs tool calls and updates status."""
 
-    def __init__(self, task_id: str, status: SubagentStatus | None = None) -> None:
+    def __init__(
+        self,
+        task_id: str,
+        status: SubagentStatus | None = None,
+        task_store: TaskStore | None = None,
+    ) -> None:
         super().__init__()
         self._task_id = task_id
         self._status = status
+        self._task_store = task_store
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         for tool_call in context.tool_calls:
@@ -65,13 +74,28 @@ class _SubagentHook(AgentHook):
             )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
-        if self._status is None:
-            return
-        self._status.iteration = context.iteration
-        self._status.tool_events = list(context.tool_events)
-        self._status.usage = dict(context.usage)
-        if context.error:
-            self._status.error = str(context.error)
+        if self._status is not None:
+            self._status.iteration = context.iteration
+            self._status.tool_events = list(context.tool_events)
+            self._status.usage = dict(context.usage)
+            if context.error:
+                self._status.error = str(context.error)
+        if self._task_store is not None:
+            self._task_store.update_task(
+                self._task_id,
+                recent_activity=_tool_activity(context.tool_events) or None,
+                usage=dict(context.usage),
+                error=str(context.error) if context.error else None,
+            )
+
+
+def _tool_activity(tool_events: list[dict[str, str]]) -> list[dict[str, str]]:
+    activities: list[dict[str, str]] = []
+    for event in tool_events:
+        if not event.get("name"):
+            continue
+        activities.append({str(k): str(v) for k, v in event.items() if v is not None})
+    return activities
 
 
 class SubagentManager:
@@ -89,6 +113,7 @@ class SubagentManager:
         restrict_to_workspace: bool = False,
         disabled_skills: list[str] | None = None,
         max_recursion_depth: int = 3,
+        task_store: TaskStore | None = None,
     ):
         self.provider = provider
         self.workspace = workspace
@@ -101,6 +126,7 @@ class SubagentManager:
         self.disabled_skills = set(disabled_skills or [])
         self._max_recursion_depth = max_recursion_depth
         self.runner = AgentRunner(provider)
+        self.task_store = task_store or TaskStore(workspace)
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
@@ -143,8 +169,15 @@ class SubagentManager:
                     f"{would_be_depth} would exceed limit {self._max_recursion_depth}."
                 )
 
-        task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
+        task_session_key = session_key or f"{origin_channel}:{origin_chat_id}"
+        task_record = self.task_store.start_task(
+            task_type="subagent",
+            label=display_label,
+            description=task,
+            session_key=task_session_key,
+        )
+        task_id = task_record.task_id
         # Capture parent identity so the late-completion announce can rebuild
         # a governed context with the parent's channel/sender_id/chat_id
         # (and resolved agent_id) rather than falling back to system/subagent
@@ -156,7 +189,7 @@ class SubagentManager:
         origin = {
             "channel": origin_channel,
             "chat_id": origin_chat_id,
-            "session_key": session_key,
+            "session_key": task_session_key,
             "sender_id": parent_sender_id,
         }
 
@@ -179,16 +212,16 @@ class SubagentManager:
             )
         )
         self._running_tasks[task_id] = bg_task
-        if session_key:
-            self._session_tasks.setdefault(session_key, set()).add(task_id)
+        if task_session_key:
+            self._session_tasks.setdefault(task_session_key, set()).add(task_id)
 
         def _cleanup(_: asyncio.Task) -> None:
             self._running_tasks.pop(task_id, None)
             self._task_statuses.pop(task_id, None)
-            if session_key and (ids := self._session_tasks.get(session_key)):
+            if task_session_key and (ids := self._session_tasks.get(task_session_key)):
                 ids.discard(task_id)
                 if not ids:
-                    del self._session_tasks[session_key]
+                    del self._session_tasks[task_session_key]
 
         bg_task.add_done_callback(_cleanup)
 
@@ -254,7 +287,7 @@ class SubagentManager:
                 model=self.model,
                 max_iterations=15,
                 max_tool_result_chars=self.max_tool_result_chars,
-                hook=_SubagentHook(task_id, status),
+                hook=_SubagentHook(task_id, status, self.task_store),
                 max_iterations_message="Task completed but no final response was generated.",
                 error_message=None,
                 fail_on_tool_error=True,
@@ -264,30 +297,80 @@ class SubagentManager:
             ))
             status.phase = "done"
             status.stop_reason = result.stop_reason
+            status.usage = dict(getattr(result, "usage", {}) or {})
+
+            usage = getattr(result, "usage", None)
+            self.task_store.update_task(
+                task_id,
+                recent_activity=_tool_activity(getattr(result, "tool_events", []) or []) or None,
+                usage=dict(usage) if usage is not None else None,
+                stop_reason=result.stop_reason,
+                error=result.error,
+            )
 
             if result.stop_reason == "tool_error":
                 status.tool_events = list(result.tool_events)
+                output = self._format_partial_progress(result)
+                self.task_store.append_output(task_id, output)
+                self.task_store.finish_task(
+                    task_id,
+                    status="failed",
+                    stop_reason=result.stop_reason,
+                    error=result.error,
+                )
                 await self._announce_result(
                     task_id, label, task,
-                    self._format_partial_progress(result),
+                    output,
                     origin, "error",
                 )
             elif result.stop_reason == "error":
+                output = result.error or "Error: subagent execution failed."
+                self.task_store.append_output(task_id, output)
+                self.task_store.finish_task(
+                    task_id,
+                    status="failed",
+                    stop_reason=result.stop_reason,
+                    error=result.error,
+                )
                 await self._announce_result(
                     task_id, label, task,
-                    result.error or "Error: subagent execution failed.",
+                    output,
+                    origin, "error",
+                )
+            elif result.error:
+                output = result.error
+                self.task_store.append_output(task_id, output)
+                self.task_store.finish_task(
+                    task_id,
+                    status="failed",
+                    stop_reason=result.stop_reason,
+                    error=result.error,
+                )
+                await self._announce_result(
+                    task_id, label, task,
+                    output,
                     origin, "error",
                 )
             else:
                 final_result = result.final_content or "Task completed but no final response was generated."
                 logger.info("Subagent [{}] completed successfully", task_id)
+                self.task_store.append_output(task_id, final_result)
+                self.task_store.finish_task(
+                    task_id,
+                    status="completed",
+                    stop_reason=result.stop_reason,
+                    error=result.error,
+                )
                 await self._announce_result(task_id, label, task, final_result, origin, "ok")
 
         except Exception as e:
             status.phase = "error"
             status.error = str(e)
             logger.error("Subagent [{}] failed: {}", task_id, e)
-            await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error")
+            output = f"Error: {e}"
+            self.task_store.append_output(task_id, output)
+            self.task_store.finish_task(task_id, status="failed", error=str(e))
+            await self._announce_result(task_id, label, task, output, origin, "error")
 
     async def _announce_result(
         self,
@@ -392,7 +475,11 @@ class SubagentManager:
         task = self._running_tasks.get(task_id)
         if task is None or task.done():
             return False
+        record = self.task_store.get(task_id)
+        if record is not None and record.status in _TASK_STORE_TERMINAL_STATUSES:
+            return False
         task.cancel()
+        self.task_store.cancel_task(task_id)
         try:
             await task
         except (asyncio.CancelledError, Exception):
@@ -401,10 +488,19 @@ class SubagentManager:
 
     async def cancel_by_session(self, session_key: str) -> int:
         """Cancel all subagents for the given session. Returns count cancelled."""
-        tasks = [self._running_tasks[tid] for tid in self._session_tasks.get(session_key, [])
-                 if tid in self._running_tasks and not self._running_tasks[tid].done()]
+        task_ids = [
+            tid for tid in self._session_tasks.get(session_key, [])
+            if tid in self._running_tasks and not self._running_tasks[tid].done()
+            and not (
+                (record := self.task_store.get(tid)) is not None
+                and record.status in _TASK_STORE_TERMINAL_STATUSES
+            )
+        ]
+        tasks = [self._running_tasks[tid] for tid in task_ids]
         for t in tasks:
             t.cancel()
+        for tid in task_ids:
+            self.task_store.cancel_task(tid)
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         return len(tasks)

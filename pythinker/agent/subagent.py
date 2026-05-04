@@ -30,9 +30,6 @@ if TYPE_CHECKING:
     from pythinker.runtime.context import RequestContext
 
 
-_TASK_STORE_TERMINAL_STATUSES = {"completed", "failed", "cancelled", "orphaned"}
-
-
 @dataclass(slots=True)
 class SubagentStatus:
     """Real-time status of a running subagent."""
@@ -476,7 +473,7 @@ class SubagentManager:
         if task is None or task.done():
             return False
         record = self.task_store.get(task_id)
-        if record is not None and record.status in _TASK_STORE_TERMINAL_STATUSES:
+        if record is not None and record.status not in {"pending", "running"}:
             return False
         task.cancel()
         self.task_store.cancel_task(task_id)
@@ -491,10 +488,6 @@ class SubagentManager:
         task_ids = [
             tid for tid in self._session_tasks.get(session_key, [])
             if tid in self._running_tasks and not self._running_tasks[tid].done()
-            and not (
-                (record := self.task_store.get(tid)) is not None
-                and record.status in _TASK_STORE_TERMINAL_STATUSES
-            )
         ]
         tasks = [self._running_tasks[tid] for tid in task_ids]
         for t in tasks:

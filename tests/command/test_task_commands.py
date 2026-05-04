@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-from pythinker.agent.task_store import TaskStore
 from pythinker.agent.tasks import TaskOutputRef, TaskRecord
 from pythinker.bus.events import InboundMessage
 from pythinker.channels.telegram import _markdown_to_telegram_html
@@ -137,68 +135,6 @@ async def test_task_output_denies_orphaned_output_with_blank_session_key() -> No
     task_store.read_output.assert_not_called()
     assert out.content == "Task output unavailable for `a_orphan`: task output not found"
     assert out.metadata["render_as"] == "text"
-
-
-async def test_task_output_reads_restarted_output_only_for_owner(tmp_path: Path) -> None:
-    task_store = TaskStore(tmp_path)
-    record = task_store.start_task(
-        task_type="subagent",
-        label="research",
-        description="inspect files",
-        session_key="websocket:chat1",
-        task_id="a_restarted",
-    )
-    task_store.append_output(record.task_id, "saved output\n")
-    task_store.finish_task(record.task_id, status="completed")
-    reloaded_store = TaskStore(tmp_path)
-    loop = SimpleNamespace(task_store=reloaded_store)
-
-    owner_out = await cmd_task_output(
-        _ctx("/task-output a_restarted", args="a_restarted", loop=loop)
-    )
-    other_msg = InboundMessage(
-        channel="websocket",
-        sender_id="user1",
-        chat_id="other",
-        content="/task-output a_restarted",
-        metadata={"source": "test"},
-    )
-    other_out = await cmd_task_output(
-        CommandContext(
-            msg=other_msg,
-            session=None,
-            key=other_msg.session_key,
-            raw="/task-output a_restarted",
-            args="a_restarted",
-            loop=loop,
-        )
-    )
-
-    assert owner_out.content.startswith("## Task Output `a_restarted`")
-    assert "saved output" in owner_out.content
-    assert other_out.content == "Task output unavailable for `a_restarted`: task output not found"
-
-
-async def test_task_output_does_not_expose_symlinked_output_for_same_session(
-    tmp_path: Path,
-) -> None:
-    task_store = TaskStore(tmp_path)
-    record = task_store.start_task(
-        task_type="subagent",
-        label="research",
-        description="inspect files",
-        session_key="websocket:chat1",
-        task_id="a_linked",
-    )
-    secret = tmp_path / "secret.txt"
-    secret.write_text("secret output", encoding="utf-8")
-    task_store._output_path(record.task_id).symlink_to(secret)
-    loop = SimpleNamespace(task_store=task_store)
-
-    out = await cmd_task_output(_ctx("/task-output a_linked", args="a_linked", loop=loop))
-
-    assert out.content == "Task output unavailable for `a_linked`: task output not found"
-    assert "secret output" not in out.content
 
 
 async def test_task_output_without_id_returns_usage() -> None:

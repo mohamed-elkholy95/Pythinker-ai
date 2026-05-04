@@ -125,15 +125,22 @@ async def test_task_output_denies_other_session_task_without_reading_output() ->
     assert out.metadata["render_as"] == "text"
 
 
-async def test_task_output_denies_orphaned_output_with_blank_session_key() -> None:
+async def test_task_output_reads_orphaned_output_with_blank_session_key() -> None:
     task_store = MagicMock()
     task_store.get.return_value = _record("a_orphan", label="", status="orphaned", session_key="")
+    task_store.read_output.return_value = TaskOutputRef(
+        task_id="a_orphan",
+        content="recovered\n",
+        offset=10,
+        truncated=False,
+    )
     loop = SimpleNamespace(task_store=task_store)
 
     out = await cmd_task_output(_ctx("/task-output a_orphan", args="a_orphan", loop=loop))
 
-    task_store.read_output.assert_not_called()
-    assert out.content == "Task output unavailable for `a_orphan`: task output not found"
+    task_store.read_output.assert_called_once_with("a_orphan", max_chars=16000)
+    assert out.content.startswith("## Task Output `a_orphan`")
+    assert "recovered" in out.content
     assert out.metadata["render_as"] == "text"
 
 

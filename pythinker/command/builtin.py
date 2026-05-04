@@ -238,7 +238,11 @@ def _task_record_for_session(ctx: CommandContext, task_id: str):
 
 def _task_output_record_for_session(ctx: CommandContext, task_id: str):
     record = ctx.loop.task_store.get(task_id)
-    if record is None or record.session_key != ctx.key:
+    if record is None:
+        return None
+    if record.status == "orphaned" and not record.session_key:
+        return record
+    if record.session_key != ctx.key:
         return None
     return record
 

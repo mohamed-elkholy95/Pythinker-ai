@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pythinker.agent.tasks import (
@@ -200,7 +201,8 @@ class TaskStore:
             task_id = path.stem
             if not _is_safe_task_id(task_id) or not path.is_file():
                 continue
-            now = utc_now_iso()
+            stat = path.stat()
+            ts = datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat()
             self._records[task_id] = TaskRecord(
                 task_id=task_id,
                 type="subagent",
@@ -208,11 +210,11 @@ class TaskStore:
                 description="",
                 session_key="",
                 status="orphaned",
-                started_at=now,
-                updated_at=now,
-                ended_at=now,
+                started_at=ts,
+                updated_at=ts,
+                ended_at=ts,
                 output_uri=self._output_uri(task_id),
-                output_offset=path.stat().st_size,
+                output_offset=stat.st_size,
                 recent_activity=[],
             )
         self._trim_recent()

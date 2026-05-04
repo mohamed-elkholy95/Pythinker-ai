@@ -259,15 +259,22 @@ def test_orphaned_outputs_are_loaded_on_startup(tmp_path: Path) -> None:
     assert store.read_output("a_existing", max_chars=100).content == "saved output"
 
 
-def test_orphaned_outputs_are_trimmed_on_startup(tmp_path: Path) -> None:
+def test_orphaned_outputs_trim_keeps_newest_by_mtime(tmp_path: Path) -> None:
+    import os
+
     output_dir = tmp_path / ".pythinker" / "task-results"
     output_dir.mkdir(parents=True)
-    (output_dir / "a_one.txt").write_text("one", encoding="utf-8")
-    (output_dir / "a_two.txt").write_text("two", encoding="utf-8")
+    older = output_dir / "a_older.txt"
+    newer = output_dir / "a_newer.txt"
+    older.write_text("older", encoding="utf-8")
+    newer.write_text("newer", encoding="utf-8")
+    os.utime(older, (1_700_000_000, 1_700_000_000))
+    os.utime(newer, (1_700_000_100, 1_700_000_100))
 
     store = TaskStore(tmp_path, max_recent=1)
 
-    assert len(store.list_records()) == 1
+    rows = store.list_records()
+    assert [r.task_id for r in rows] == ["a_newer"]
 
 
 def test_missing_output_uses_error_shape(tmp_path: Path) -> None:

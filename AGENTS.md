@@ -3,8 +3,8 @@
 Telegraph style. Root rules only. Read scoped `AGENTS.md` (e.g. `pythinker/templates/AGENTS.md`) before subtree work.
 
 ## Start
-
-- Repo: `https://github.com/mohamed-elkholy95/Pythinker`
+- Prefer simplicity—no over-engineering. This is a strict requirement for all features, additions, and any changes made to this codebase.
+- Repo: `https://github.com/mohamed-elkholy95/Pythinker-ai`
 - PyPI: `https://pypi.org/project/pythinker-ai/`
 - Replies: repo-root refs only: `pythinker/agent/loop.py:120`. No absolute paths, no `~/`.
 - Read first: `docs/ARCHITECTURE.md` for the runtime spine, `CONTRIBUTING.md` for PR rules, `CLAUDE.md` for agent-specific commands, `SECURITY.md` for known gaps.

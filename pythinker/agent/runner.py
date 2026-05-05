@@ -290,31 +290,7 @@ class AgentRunner:
         injection_cycles = 0
 
         for iteration in range(spec.max_iterations):
-            try:
-                # Keep the persisted conversation untouched. Context governance
-                # may repair or compact historical messages for the model, but
-                # those synthetic edits must not shift the append boundary used
-                # later when the caller saves only the new turn.
-                messages_for_model = self._drop_orphan_tool_results(messages)
-                messages_for_model = self._backfill_missing_tool_results(messages_for_model)
-                messages_for_model = self._microcompact(messages_for_model)
-                messages_for_model = self._apply_tool_result_budget(spec, messages_for_model)
-                messages_for_model = self._snip_history(spec, messages_for_model)
-                # Snipping may have created new orphans; clean them up.
-                messages_for_model = self._drop_orphan_tool_results(messages_for_model)
-                messages_for_model = self._backfill_missing_tool_results(messages_for_model)
-            except Exception as exc:
-                logger.warning(
-                    "Context governance failed on turn {} for {}: {}; applying minimal repair",
-                    iteration,
-                    spec.session_key or "default",
-                    exc,
-                )
-                try:
-                    messages_for_model = self._drop_orphan_tool_results(messages)
-                    messages_for_model = self._backfill_missing_tool_results(messages_for_model)
-                except Exception:
-                    messages_for_model = messages
+            messages_for_model = self._prepare_messages_for_model(spec, messages, iteration)
             context = AgentHookContext(iteration=iteration, messages=messages)
             await hook.before_iteration(context)
             response = await self._request_model(spec, messages_for_model, hook, context)
@@ -325,94 +301,30 @@ class AgentRunner:
             self._accumulate_usage(usage, raw_usage)
 
             if response.should_execute_tools:
-                if hook.wants_streaming():
-                    await hook.on_stream_end(context, resuming=True)
-
-                assistant_message = build_assistant_message(
-                    response.content or "",
-                    tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],
-                    reasoning_content=response.reasoning_content,
-                    thinking_blocks=response.thinking_blocks,
-                )
-                messages.append(assistant_message)
-                tools_used.extend(tc.name for tc in response.tool_calls)
-                await self._emit_checkpoint(
-                    spec,
-                    {
-                        "phase": "awaiting_tools",
-                        "iteration": iteration,
-                        "model": spec.model,
-                        "assistant_message": assistant_message,
-                        "completed_tool_results": [],
-                        "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
-                    },
-                )
-
-                await hook.before_execute_tools(context)
-
-                results, new_events, fatal_error = await self._execute_tools(
-                    spec,
-                    response.tool_calls,
-                    external_lookup_counts,
-                )
-                tool_events.extend(new_events)
-                context.tool_results = list(results)
-                context.tool_events = list(new_events)
-                await hook.after_execute_tools(context, list(results))
-                completed_tool_results: list[dict[str, Any]] = []
-                for tool_call, result in zip(response.tool_calls, results):
-                    tool_message = {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": tool_call.name,
-                        "content": self._normalize_tool_result(
-                            spec,
-                            tool_call.id,
-                            tool_call.name,
-                            result,
-                        ),
-                    }
-                    messages.append(tool_message)
-                    completed_tool_results.append(tool_message)
-                if fatal_error is not None:
-                    error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
-                    final_content = error
-                    stop_reason = "tool_error"
-                    self._append_final_message(messages, final_content)
-                    context.final_content = final_content
-                    context.error = error
-                    context.stop_reason = stop_reason
-                    await hook.after_iteration(context)
-                    should_continue, injection_cycles = await self._try_drain_injections(
-                        spec, messages, None, injection_cycles,
-                        phase="after tool error",
+                action, injection_cycles, drained, reset_retry_counters, terminal = (
+                    await self._handle_tool_iteration(
+                        spec,
+                        hook,
+                        context,
+                        response,
+                        iteration,
+                        messages,
+                        tools_used,
+                        tool_events,
+                        external_lookup_counts,
+                        injection_cycles,
                     )
-                    if should_continue:
-                        had_injections = True
-                        continue
-                    break
-                await self._emit_checkpoint(
-                    spec,
-                    {
-                        "phase": "tools_completed",
-                        "iteration": iteration,
-                        "model": spec.model,
-                        "assistant_message": assistant_message,
-                        "completed_tool_results": completed_tool_results,
-                        "pending_tool_calls": [],
-                    },
                 )
-                empty_content_retries = 0
-                length_recovery_count = 0
-                # Checkpoint 1: drain injections after tools, before next LLM call
-                _drained, injection_cycles = await self._try_drain_injections(
-                    spec, messages, None, injection_cycles,
-                    phase="after tool execution",
-                )
-                if _drained:
+                if drained:
                     had_injections = True
-                await hook.after_iteration(context)
-                continue
+                if reset_retry_counters:
+                    empty_content_retries = 0
+                    length_recovery_count = 0
+                if terminal is not None:
+                    final_content, error, stop_reason = terminal
+                if action == "continue":
+                    continue
+                break
 
             if response.has_tool_calls:
                 logger.warning(
@@ -558,16 +470,7 @@ class AgentRunner:
             break
         else:
             stop_reason = "max_iterations"
-            if spec.max_iterations_message:
-                final_content = spec.max_iterations_message.format(
-                    max_iterations=spec.max_iterations,
-                )
-            else:
-                final_content = render_template(
-                    "agent/max_iterations_message.md",
-                    strip=True,
-                    max_iterations=spec.max_iterations,
-                )
+            final_content = self._resolve_max_iterations_message(spec)
             self._append_final_message(messages, final_content)
             # Drain any remaining injections so they are appended to the
             # conversation history instead of being re-published as
@@ -613,6 +516,181 @@ class AgentRunner:
         if spec.reasoning_effort is not None:
             kwargs["reasoning_effort"] = spec.reasoning_effort
         return kwargs
+
+    def _prepare_messages_for_model(
+        self,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+        iteration: int,
+    ) -> list[dict[str, Any]]:
+        """Apply context governance for the next provider call.
+
+        Keep the persisted conversation untouched. Context governance may
+        repair or compact historical messages for the model, but those
+        synthetic edits must not shift the append boundary used later when
+        the caller saves only the new turn. On any governance failure, fall
+        back to a minimal repair (orphan-drop + backfill); if even that
+        fails, return the raw messages.
+        """
+        try:
+            messages_for_model = self._drop_orphan_tool_results(messages)
+            messages_for_model = self._backfill_missing_tool_results(messages_for_model)
+            messages_for_model = self._microcompact(messages_for_model)
+            messages_for_model = self._apply_tool_result_budget(spec, messages_for_model)
+            messages_for_model = self._snip_history(spec, messages_for_model)
+            # Snipping may have created new orphans; clean them up.
+            messages_for_model = self._drop_orphan_tool_results(messages_for_model)
+            messages_for_model = self._backfill_missing_tool_results(messages_for_model)
+            return messages_for_model
+        except Exception as exc:
+            logger.warning(
+                "Context governance failed on turn {} for {}: {}; applying minimal repair",
+                iteration,
+                spec.session_key or "default",
+                exc,
+            )
+            try:
+                messages_for_model = self._drop_orphan_tool_results(messages)
+                return self._backfill_missing_tool_results(messages_for_model)
+            except Exception:
+                return messages
+
+    @staticmethod
+    def _resolve_max_iterations_message(spec: AgentRunSpec) -> str:
+        """Pick the max-iterations message — caller-supplied or default template."""
+        if spec.max_iterations_message:
+            return spec.max_iterations_message.format(max_iterations=spec.max_iterations)
+        return render_template(
+            "agent/max_iterations_message.md",
+            strip=True,
+            max_iterations=spec.max_iterations,
+        )
+
+    async def _handle_tool_iteration(
+        self,
+        spec: AgentRunSpec,
+        hook: AgentHook,
+        context: AgentHookContext,
+        response: LLMResponse,
+        iteration: int,
+        messages: list[dict[str, Any]],
+        tools_used: list[str],
+        tool_events: list[dict[str, str]],
+        external_lookup_counts: dict[str, int],
+        injection_cycles: int,
+    ) -> tuple[
+        str,
+        int,
+        bool,
+        bool,
+        tuple[str | None, str | None, str] | None,
+    ]:
+        """Run the tool-execution branch of one iteration.
+
+        Returns ``(action, injection_cycles, drained, reset_retry_counters,
+        terminal)``:
+
+        - ``action`` is ``"continue"`` or ``"break"`` — the orchestrator
+          performs the actual loop control so the for/else on
+          ``run()``'s outer loop stays intact.
+        - ``injection_cycles`` is the updated counter.
+        - ``drained`` is True when any injection cycle ran in this branch
+          (so the orchestrator can flip ``had_injections``).
+        - ``reset_retry_counters`` is True on the tool-success path; it
+          tells the orchestrator to clear ``empty_content_retries`` and
+          ``length_recovery_count`` (which only this branch resets).
+        - ``terminal`` is ``(final_content, error, stop_reason)`` on a
+          fatal-tool-error exit, otherwise ``None``.
+
+        Mutates ``messages``, ``tools_used``, ``tool_events``, and
+        ``external_lookup_counts`` in place — same lifecycle as the
+        original inline block.
+        """
+        if hook.wants_streaming():
+            await hook.on_stream_end(context, resuming=True)
+
+        assistant_message = build_assistant_message(
+            response.content or "",
+            tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],
+            reasoning_content=response.reasoning_content,
+            thinking_blocks=response.thinking_blocks,
+        )
+        messages.append(assistant_message)
+        tools_used.extend(tc.name for tc in response.tool_calls)
+        await self._emit_checkpoint(
+            spec,
+            {
+                "phase": "awaiting_tools",
+                "iteration": iteration,
+                "model": spec.model,
+                "assistant_message": assistant_message,
+                "completed_tool_results": [],
+                "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
+            },
+        )
+
+        await hook.before_execute_tools(context)
+
+        results, new_events, fatal_error = await self._execute_tools(
+            spec,
+            response.tool_calls,
+            external_lookup_counts,
+        )
+        tool_events.extend(new_events)
+        context.tool_results = list(results)
+        context.tool_events = list(new_events)
+        await hook.after_execute_tools(context, list(results))
+        completed_tool_results: list[dict[str, Any]] = []
+        for tool_call, result in zip(response.tool_calls, results):
+            tool_message = {
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "content": self._normalize_tool_result(
+                    spec,
+                    tool_call.id,
+                    tool_call.name,
+                    result,
+                ),
+            }
+            messages.append(tool_message)
+            completed_tool_results.append(tool_message)
+        if fatal_error is not None:
+            error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
+            final_content = error
+            stop_reason = "tool_error"
+            self._append_final_message(messages, final_content)
+            context.final_content = final_content
+            context.error = error
+            context.stop_reason = stop_reason
+            await hook.after_iteration(context)
+            should_continue, injection_cycles = await self._try_drain_injections(
+                spec, messages, None, injection_cycles,
+                phase="after tool error",
+            )
+            terminal = (final_content, error, stop_reason)
+            if should_continue:
+                return "continue", injection_cycles, True, False, terminal
+            return "break", injection_cycles, False, False, terminal
+
+        await self._emit_checkpoint(
+            spec,
+            {
+                "phase": "tools_completed",
+                "iteration": iteration,
+                "model": spec.model,
+                "assistant_message": assistant_message,
+                "completed_tool_results": completed_tool_results,
+                "pending_tool_calls": [],
+            },
+        )
+        # Checkpoint 1: drain injections after tools, before next LLM call
+        drained, injection_cycles = await self._try_drain_injections(
+            spec, messages, None, injection_cycles,
+            phase="after tool execution",
+        )
+        await hook.after_iteration(context)
+        return "continue", injection_cycles, drained, True, None
 
     async def _request_model(
         self,

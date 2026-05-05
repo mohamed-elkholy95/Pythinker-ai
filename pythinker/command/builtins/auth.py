@@ -41,10 +41,12 @@ def _resolve_spec(arg: str) -> Any | None:
 def _file_storage(spec) -> Any | None:
     """Build a ``FileTokenStorage`` matching ``spec``'s registry fields.
 
-    Returns ``None`` if oauth_cli_kit isn't importable.
+    Returns ``None`` if oauth_cli_kit isn't importable. ``FileTokenStorage``
+    lives in the ``storage`` submodule — it is intentionally NOT re-exported
+    at the package root, so the import path matters.
     """
     try:
-        from oauth_cli_kit import FileTokenStorage
+        from oauth_cli_kit.storage import FileTokenStorage
     except Exception:
         return None
 
@@ -73,9 +75,13 @@ def _auth_state(spec) -> tuple[str, str]:
     Reads the token file directly via ``FileTokenStorage.load()`` so we
     never trigger a refresh or interactive flow from a chat turn.
     """
+    try:
+        from oauth_cli_kit.storage import FileTokenStorage  # noqa: F401
+    except Exception as exc:
+        return "ERROR", f"oauth_cli_kit unavailable ({type(exc).__name__})"
     storage = _file_storage(spec)
     if storage is None:
-        return "ERROR", "oauth_cli_kit not installed"
+        return "ERROR", "oauth_cli_kit storage backend unavailable"
     try:
         tok = storage.load()
     except Exception as exc:

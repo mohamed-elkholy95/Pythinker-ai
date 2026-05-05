@@ -33,7 +33,7 @@ def test_ambiguous_prefix_returns_none() -> None:
 
 def test_unknown_command_returns_none() -> None:
     from pythinker.cli.tui.commands import parse
-    cmd, _ = parse("/login")
+    cmd, _ = parse("/no-such-command-xyzzy")
     assert cmd is None
 
 

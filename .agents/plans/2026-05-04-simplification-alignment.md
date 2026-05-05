@@ -5,7 +5,7 @@
 > sit in public `docs/`. Do not link to this from `README.md`,
 > `AGENTS.md`, the wheel, or any user-facing surface.
 >
-> **Errata.** Three correction passes have landed; the full changelog is in §15.
+> **Errata.** Four correction passes have landed; the full changelog is in §15.
 > In-line `**Correction.**` blocks mark spots where an earlier draft was wrong.
 >
 > **Status:** Draft. Comprehensive file-by-file scan of Pythinker's runtime tree
@@ -70,8 +70,12 @@ These are the only rules an implementer should bring to the work below:
    surface it for review.
 3. **No drive-by refactors inside this plan.** Each phase touches one
    subsystem, has its own commit, and ships a green CI matrix.
-4. **Tests follow code.** When a module splits, its tests move with it; we do
-   not maintain "umbrella" test files that pretend the old shape still exists.
+4. **Tests follow code, but not in the split PR.**
+   **Correction (Pass 4 → 5).** Earlier drafts said tests move with the
+   code in the split PR. They don't — the split PR keeps existing import
+   and monkeypatch paths working so behavior-preserving moves can be
+   reviewed cleanly, and test relocation may happen in a follow-up
+   cleanup PR after the compatibility shim has proven green.
 5. **No new abstractions for hypothetical futures.** Every change in
    this plan must close a known smell, not open a future seam. If a
    second caller doesn't exist yet, the abstraction doesn't exist yet.
@@ -129,11 +133,29 @@ per step (~50–150 LOC each). The driver in `onboard.py` shrinks to a
 - Move OAuth helpers (`_login_via_oauth_remote`,
   `_set_provider_api_key`) into `pythinker/cli/onboard_auth.py`.
 
+**Private-import compatibility.** Current tests and `tests/conftest.py`
+reach directly into `pythinker.cli.onboard` for both public-ish types and
+private wizard helpers. Run the §6 audit first — every name it surfaces
+(across `from pythinker.cli.onboard import …`, `monkeypatch.setattr`, and
+`patch("pythinker.cli.onboard.…")` callsites) must remain importable from
+the old module. Notable categories observed today: result/context types
+(`OnboardResult`, `StepResult`, `_WizardContext`), wizard machinery
+(`_WIZARD_STEPS`, `_run_linear_wizard`, every `_step_*`), validators
+(`_validate_field_constraint`, the `_SETTINGS_*` tables), interactive
+shims (`_get_questionary`, `_BACK_PRESSED`, `WebSearchTool`), and patch
+targets such as `get_config_path`, `save_config`, `run_onboard`,
+`_login_via_oauth_remote`. Re-exporting a moved function is not enough
+when tests patch a module global used by that function; either leave a
+thin wrapper in `onboard.py` or make the moved helper resolve the
+patched dependency through the compatibility module. The split PR is
+not done until `pytest tests/cli tests/config tests/agent/test_onboard_logic.py`
+is green without test edits.
+
 **Estimated LOC delta:** −300 to −500 (inline prose dedup, banner removal,
 collapsing the `StepResult` shape that exists only to carry a `next` enum).
 
-**Risk:** Low. Onboarding is exercised by `tests/cli/`. The split touches only
-imports.
+**Risk:** Medium. Onboarding is exercised by `tests/cli/`, but the tests pin
+many private import and patch paths on `pythinker.cli.onboard`.
 
 **Verify.**
 ```
@@ -411,11 +433,21 @@ little code.
 
 ```
 pythinker/agent/memory/
-├── __init__.py        # re-exports MemoryStore, Consolidator, Dream
+├── __init__.py        # re-exports MemoryStore, Consolidator, Dream + compatibility helpers
 ├── store.py           # MemoryStore + path conventions ~250 LOC
 ├── consolidator.py    # Consolidator ~300 LOC
 └── dream.py           # Dream + dulwich integration ~350 LOC
 ```
+
+**Private-import compatibility.** Tests currently monkeypatch
+`pythinker.agent.memory.estimate_message_tokens` through a module alias while
+exercising `Consolidator`. If `Consolidator` moves to
+`memory/consolidator.py` and imports `estimate_message_tokens` directly from
+`pythinker.utils.helpers`, that monkeypatch stops affecting the code under
+test. Keep `estimate_message_tokens` exported from `pythinker.agent.memory`
+and either have the consolidator resolve token estimation through the
+compatibility module or adjust the split so the existing monkeypatch target
+remains authoritative. Do not edit those tests in the split PR.
 
 **Estimated LOC delta:** −60 (drop a near-duplicate "render system prompt
 for memory edit" between `Dream` and `MemoryStore.summarize`).
@@ -542,8 +574,9 @@ landed in commit `5a77b68`).
 2. `AdminService` keeps the mutation routes and the surface composition.
 3. Move the redaction helpers (`_redact_url`, `_redacted_path_is_set`,
    `_path_value`) to `pythinker/admin/redact.py` — they're testable in
-   isolation and right now their tests are buried under
-   `tests/admin/test_service.py`.
+   isolation. The current admin test surface is thin
+   (`tests/admin/test_config_backups.py` only), so the split PR should add
+   focused tests for snapshot/redaction behavior under `tests/admin/`.
 
 **Estimated LOC delta:** −60.
 
@@ -578,12 +611,26 @@ direction — group by topic *now* rather than later.
 
 ```
 pythinker/command/builtins/
-├── __init__.py     # registers everything (back-compat shim)
+├── __init__.py     # imports/registers grouped handlers
 ├── lifecycle.py    # /new, /restart, /stop, /status, /help
 ├── dream.py        # /dream, /dream-log, /dream-restore
 ├── tasks.py        # /tasks, /task-output, /task-stop
 └── format.py       # _escape_markdown_text, _fenced_text, _format_task_row
+pythinker/command/builtin.py  # legacy shim; keeps old dotted path alive
 ```
+
+**Import/patch compatibility.** `pythinker.command.builtin` is the current
+load-bearing import path for runtime registration, channel help rendering, and
+tests. Keep `pythinker/command/builtin.py` as a compatibility module that
+exports every old handler/helper (`cmd_*`, `build_help_text`,
+`register_builtin_commands`, formatting helpers used by tests). Existing tests
+also patch `pythinker.command.builtin.asyncio` and
+`pythinker.command.builtin.os.execv` around `/restart`; a plain re-export of
+`cmd_restart` from `builtins/lifecycle.py` will not make those patches affect
+the moved function's globals. Either keep a patchable wrapper for `cmd_restart`
+in `builtin.py`, or make the implementation read those dependencies through
+the compatibility module. The split PR is not done until `pytest tests/command
+tests/cli/test_restart_command.py` is green without test edits.
 
 **Estimated LOC delta:** ~0 (refactor for navigability).
 
@@ -822,8 +869,10 @@ MUST:
    every name `monkeypatch` / `unittest.mock.patch` reaches into.
 3. Re-export every hit in the new `__init__.py`. The split is not done
    until `pytest <subset>` is green *without editing the test files*.
-   Test edits are allowed in a follow-up PR; the split itself must be a
-   pure code-move.
+   For patch targets, a re-export may be insufficient because a moved
+   function keeps the globals of its new module; keep wrappers or dependency
+   lookups at the old dotted path when tests patch that path. Test edits are
+   allowed in a follow-up PR; the split itself must be a pure code-move.
 
 For phases that touch `pythinker/channels/` or `pythinker/cli/`:
 
@@ -1289,10 +1338,13 @@ When a phase from §3 lands, here is the exact set of files it should touch:
 ### Phase A
 - A1 (onboard split): `pythinker/cli/onboard.py` → split into
   `pythinker/cli/onboard_steps/*.py` + `onboard_options.py` + `onboard_auth.py`
-  + `onboard_types.py`. Tests under `tests/cli/test_onboard*.py`.
+  + `onboard_types.py`, while `onboard.py` remains the compatibility surface
+  for current private imports and monkeypatch targets. Tests under
+  `tests/cli/test_onboard*.py` and `tests/config/test_config_migration.py`.
 - A2 (memory split): `pythinker/agent/memory.py` → `pythinker/agent/memory/`
-  package. Tests under `tests/agent/test_memory*.py`,
-  `test_consolidator.py`, `test_dream.py`.
+  package. Preserve `pythinker.agent.memory.estimate_message_tokens` as the
+  authoritative monkeypatch target for consolidation tests. Tests under
+  `tests/agent/test_memory*.py`, `test_consolidator.py`, `test_dream.py`.
 - A3 (pdf — optional polish only): `pythinker/agent/tools/pdf.py` is
   generation-only. If the maintainer wants the polish, extract inline CSS
   template + font metric tables to
@@ -1302,9 +1354,11 @@ When a phase from §3 lands, here is the exact set of files it should touch:
   in scope. Tests under `tests/agent/tools/test_pdf*.py`.
 - A4 (admin split): `pythinker/admin/service.py` → `+ snapshot.py + redact.py`.
   Tests under `tests/admin/`.
-- A5 (command split): `pythinker/command/builtin.py` →
+- A5 (command split): `pythinker/command/builtin.py` remains a legacy shim;
+  implementations move to
   `pythinker/command/builtins/{lifecycle,dream,tasks,format}.py`.
-  Tests under `tests/command/`.
+  Preserve old import and patch targets on `pythinker.command.builtin`. Tests
+  under `tests/command/` plus `tests/cli/test_restart_command.py`.
 
 ### Phase B
 - B1 (runner phases): `pythinker/agent/runner.py` — no file split, only
@@ -1395,8 +1449,9 @@ Issues raised in review that are explicitly **not** fixed by this plan:
 | Pass | Date | What changed |
 |---|---|---|
 | 1 → 2 | 2026-05-04 | First post-review correction. Withdrew §4.1 (templates), §4.2 (PolicyDecision.behavior), §4.4 (api/server provider unify), §2.9 (pdf render/extract). Widened §1 public-surface fence. |
-| 2 → 3 | 2026-05-04 | Second post-review correction. 12 fixes: relocated to `.agents/plans/` (maintainer scope per `.agents/README.md`); reframed §1 single-user principle so it does not steer past `SECURITY.md` defenses; corrected `AgentRunner.execute` → `run`; removed `usage.py` "DEAD?" marking after confirming live websocket+admin imports; reconciled §9 with §1 on the public-surface list; replaced `parse.py` with `parsing.py`; pulled the missing autonomous-task-spine spec citation; switched branch-target guidance to `dev` per `CONTRIBUTING.md:30,66`; added Phase E TUI cross-import warning; corrected stale test paths (`test_runner_*.py`, `test_openai_compat*.py`, `test_memory.py`, `tests/admin/test_service.py`); fixed top-10 LOC sum (16,798) and percentages (36% / 24%); de-emphasized the context-norm "duplication" claim now that the shared helper is acknowledged. |
-| 3 → 4 | 2026-05-04 | Third post-review correction (this revision). Defined the unit of shipping as **work-item PR**, not phase-PR (§3, §A–E summaries). Trimmed §1.1 to the personal-agent ceiling — "don't remove what already ships, don't add new layers either" (no RBAC / two-tier tokens / Origin allowlists). Re-opened §4.4 narrowly: `pythinker/pythinker.py:159` also defines `_make_provider`; Phase E folds reconciliation in as an action item rather than a separate PR. Withdrew §4.5 (wrong packaging lever). Added the **import/patch compatibility checklist** to §6 and an explicit private-import audit to §2.3. Corrected the `AgentLoop.__init__` shrink claim — file moves don't drop ctor inputs (§2.4 + §8). Split §8 metrics into "net deletion" vs "top-heavy concentration" so pure file-moves stop inflating the headline. Fixed §10 + §0 banner: implementation plans land in `.agents/plans/`, not `docs/superpowers/plans/`. Fixed §12 tally row (DEAD? → 0). Trimmed `InboundMessage` overstatement in §1 principle 6. Replaced §9 worktree question (unprovable spec citation) with a default + opt-in. Updated runner row in §11.3 + top-10 row in §0 to reference `run()` instead of `execute()`. Trimmed the §0 errata banner. |
+| 2 → 3 | 2026-05-04 | Second post-review correction. 12 fixes: relocated to `.agents/plans/` (maintainer scope per `.agents/README.md`); reframed §1 single-user principle so it does not steer past `SECURITY.md` defenses; corrected `AgentRunner.execute` → `run`; removed `usage.py` "DEAD?" marking after confirming live websocket+admin imports; reconciled §9 with §1 on the public-surface list; replaced `parse.py` with `parsing.py`; pulled the missing autonomous-task-spine spec citation; switched branch-target guidance to `dev` per `CONTRIBUTING.md:30,66`; added Phase E TUI cross-import warning; corrected several stale test paths and marked admin service tests as a gap; fixed top-10 LOC sum (16,798) and percentages (36% / 24%); de-emphasized the context-norm "duplication" claim now that the shared helper is acknowledged. |
+| 3 → 4 | 2026-05-04 | Third post-review correction. Defined the unit of shipping as **work-item PR**, not phase-PR (§3, §A–E summaries). Trimmed §1.1 to the personal-agent ceiling — "don't remove what already ships, don't add new layers either" (no RBAC / two-tier tokens / Origin allowlists). Re-opened §4.4 narrowly: `pythinker/pythinker.py:159` also defines `_make_provider`; Phase E folds reconciliation in as an action item rather than a separate PR. Withdrew §4.5 (wrong packaging lever). Added the **import/patch compatibility checklist** to §6 and an explicit private-import audit to §2.3. Corrected the `AgentLoop.__init__` shrink claim — file moves don't drop ctor inputs (§2.4 + §8). Split §8 metrics into "net deletion" vs "top-heavy concentration" so pure file-moves stop inflating the headline. Fixed §10 + §0 banner: implementation plans land in `.agents/plans/`, not `docs/superpowers/plans/`. Fixed §12 tally row (DEAD? → 0). Trimmed `InboundMessage` overstatement in §1 principle 6. Replaced §9 worktree question (unprovable spec citation) with a default + opt-in. Updated runner row in §11.3 + top-10 row in §0 to reference `run()` instead of `execute()`. Trimmed the §0 errata banner. |
+| 4 → 5 | 2026-05-04 | Fourth post-review correction (this revision). Added explicit compatibility contracts for `pythinker.cli.onboard`, `pythinker.agent.memory.estimate_message_tokens`, and `pythinker.command.builtin` import/patch targets; fixed the nonexistent admin service test reference; reconciled "tests follow code" with the no-test-edits split-PR policy via an in-place `**Correction.**` block on §1 rule 4 (the rule itself was rewritten, not appended) and tightened §2.3 to defer to the §6 audit instead of duplicating a partial export list. |
 
 ---
 

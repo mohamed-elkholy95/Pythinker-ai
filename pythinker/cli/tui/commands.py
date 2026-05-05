@@ -222,19 +222,85 @@ async def _run_router_command(app: "TuiApp", handler, args: list[str]) -> None:
 
 
 async def _cmd_login(app: "TuiApp", args: list[str]) -> None:
-    """``/login`` — open the provider picker; auth happens on-select.
+    """``/login [provider]`` — picker, or force-reauth a named provider.
 
-    The picker now owns the auth UX: rows show provider name + auth-state
-    badge, and selecting a row that's not yet ``ready`` runs the OAuth flow
-    (Codex / Copilot) or prompts for an API key (everyone else) before
-    switching the active provider. Direct ``/login <name>`` is intentionally
-    not supported — pick from the menu so the same review-before-switch
-    affordance applies.
+    Without an arg: open the provider picker. The picker shows auth state
+    and runs the appropriate auth flow (OAuth or masked api-key prompt)
+    on-select for any provider that's not yet ready.
+
+    With a provider name (``/login minimax``, ``/login openai-codex``):
+    bypass the picker and force a re-auth. Useful when a previously saved
+    key is bad — the picker would otherwise paint it as ✓ ready and just
+    switch without giving you a chance to retype.
     """
-    del args  # picker is the single entry point — args ignored.
-    from pythinker.cli.tui.pickers.provider import open_provider_picker
+    from pythinker.cli.tui.auth_actions import authenticate_provider
+    from pythinker.cli.tui.pickers.provider import (
+        _default_model_for,
+        open_provider_picker,
+    )
+    from pythinker.providers.registry import find_by_name
 
-    await open_provider_picker(app)
+    arg = args[0].strip() if args else ""
+    if not arg:
+        # force_reauth=True so picking an already-✓-ready provider still
+        # opens the masked prompt, letting the user paste a new key to
+        # override the saved one. Ctrl-C in the prompt keeps the existing
+        # config (no-op).
+        await open_provider_picker(app, force_reauth=True)
+        return
+
+    spec = find_by_name(arg.replace("-", "_"))
+    if spec is None:
+        app.chat_pane.append_notice(
+            f"unknown provider: {arg!r}. Run /login (no args) to see the list.",
+            kind="warn",
+        )
+        return
+
+    ok, detail = await authenticate_provider(app, spec)
+    if not ok:
+        app.chat_pane.append_notice(
+            f"{spec.label} authentication failed: {detail}",
+            kind="warn" if detail == "cancelled" else "error",
+        )
+        return
+
+    # Switch the active provider/model so the next turn uses the new
+    # creds. Mirrors the picker's switch logic (see pickers/provider.py).
+    try:
+        from pythinker.config.loader import get_config_path, save_config
+        from pythinker.providers.factory import build_provider_snapshot
+
+        new_config = app.config.model_copy(deep=True)
+        new_config.agents.defaults.provider = spec.name
+        new_model = await _default_model_for(spec.name, new_config)
+        if new_model:
+            new_config.agents.defaults.model = new_model
+        snapshot = build_provider_snapshot(new_config)
+        app.agent_loop._apply_provider_snapshot(snapshot)  # noqa: SLF001
+        app.config = new_config
+        if new_model:
+            app.state.model = new_model
+        app.state.provider = spec.name
+        try:
+            save_config(new_config, get_config_path())
+        except Exception as save_exc:  # noqa: BLE001
+            app.chat_pane.append_notice(
+                f"provider swapped in-session, but persisting failed: {save_exc}",
+                kind="warn",
+            )
+    except Exception as exc:  # noqa: BLE001
+        app.chat_pane.append_notice(
+            f"provider switch failed: {exc}", kind="error"
+        )
+        return
+
+    app.chat_pane.append_notice(
+        f"✓ Re-authenticated with {spec.label} ({detail}). "
+        f"Active provider → {spec.name}",
+        kind="info",
+    )
+    app.status_bar.refresh()
 
 
 async def _cmd_logout(app: "TuiApp", args: list[str]) -> None:

@@ -72,30 +72,50 @@ async def run_oauth_login_in_terminal(spec) -> tuple[bool, str]:
     return await run_in_terminal(_do)
 
 
-async def prompt_api_key(label: str, env_key: str, signup_url: str) -> str:
-    """Pause the TUI and read a masked API key from the terminal.
+async def prompt_api_key(
+    app: "TuiApp", label: str, env_key: str, signup_url: str
+) -> str:
+    """Open a TUI overlay and read an API key.
 
-    Uses ``run_in_terminal`` so prompt_toolkit yields the screen to plain
-    stdio while ``getpass`` echoes nothing back. Returns the raw key
-    (already stripped) or ``""`` if the user cancelled with Ctrl-C / Ctrl-D.
+    Uses an in-app overlay (``InputDialogScreen``) instead of
+    ``run_in_terminal`` + ``getpass`` / ``input()``. Paste arrives through
+    prompt_toolkit's regular key pipeline, which decodes bracketed-paste
+    sequences into individual character events — so paste works on every
+    terminal, the captured value is clean (no escape markers), and the key
+    is masked in the display while the length is shown for confirmation.
+
+    Returns the captured key (already trimmed) or ``""`` if the user
+    cancelled with Esc.
     """
-    from getpass import getpass
+    import re
 
-    from prompt_toolkit.application import run_in_terminal
+    from pythinker.cli.tui.screens.input_dialog import InputDialogScreen
 
-    def _ask() -> str:
-        print()
-        print(f"Enter API key for {label} (input hidden):")
-        if signup_url:
-            print(f"  Get one at: {signup_url}")
-        try:
-            return getpass(f"  {env_key} > ")
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return ""
+    _printable_ascii = re.compile(r"[^\x21-\x7e]")
 
-    raw = await run_in_terminal(_ask)
-    return (raw or "").strip()
+    hint_lines = [f"Saves to ~/.pythinker/config.json under providers.{env_key}."]
+    if signup_url:
+        hint_lines.append(f"Get a key at: {signup_url}")
+    screen = InputDialogScreen(
+        title=f"API key — {label}",
+        prompt=f"{env_key} >",
+        hint="\n".join(hint_lines),
+        mask=True,
+    )
+    app.overlay.push(screen)
+    app.application.invalidate()
+    try:
+        raw = await screen.future
+    finally:
+        # commit() / on_cancel() resolve the future but don't pop the
+        # overlay; do that here so the dialog disappears whether the user
+        # pressed Enter or Esc.
+        if app.overlay.top is screen:
+            app.overlay.pop()
+        app.application.invalidate()
+    if raw is None:
+        return ""
+    return _printable_ascii.sub("", raw).strip()
 
 
 async def save_api_key_and_reload(app: "TuiApp", spec, key: str) -> str | None:
@@ -152,6 +172,7 @@ async def authenticate_provider(app: "TuiApp", spec) -> tuple[bool, str]:
         return True, "local / direct — no credentials needed"
 
     key = await prompt_api_key(
+        app,
         spec.label,
         getattr(spec, "env_key", "API_KEY"),
         getattr(spec, "signup_url", ""),

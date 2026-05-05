@@ -136,7 +136,14 @@ async def _default_model_for(provider_name: str, config) -> str | None:
     )
 
 
-async def open_provider_picker(app: "TuiApp") -> None:
+async def open_provider_picker(app: "TuiApp", *, force_reauth: bool = False) -> None:
+    """Open the provider picker overlay.
+
+    ``force_reauth`` (used by ``/login``): when True, selecting a row that's
+    already ✓ ready re-prompts the user for credentials anyway (paste a new
+    key, or Ctrl-C to keep the saved one). Default ``False`` — used by
+    ``/provider`` — switches silently when the provider is already configured.
+    """
     from pythinker.providers.registry import PROVIDERS
     specs = list(PROVIDERS)
     # Pre-compute readiness once so label_fn is O(1) per render instead of
@@ -149,18 +156,30 @@ async def open_provider_picker(app: "TuiApp") -> None:
         new_id = getattr(spec, "name", None)
         if not new_id:
             return
-        # If the provider isn't ready, run auth inline (OAuth flow for
-        # Codex / Copilot, masked api-key prompt for everyone else) and
-        # only proceed to the switch if it succeeds. Mirrors `/login`'s
-        # behaviour — same code path lives in tui.auth_actions.
+        # Decide whether to (re-)run the auth flow: needs-setup always does,
+        # /login (force_reauth=True) does even when already ✓ ready so the
+        # user can replace a stale or broken saved key. Local / direct
+        # providers have no creds to manage and skip the prompt.
         state, hint = _provider_status(spec, app.config)
-        if state == "needs-setup":
+        skip_auth = state == "no-auth"
+        run_auth = not skip_auth and (state == "needs-setup" or force_reauth)
+        if run_auth:
             from pythinker.cli.tui.auth_actions import authenticate_provider
 
             app.overlay.pop()
             app.application.invalidate()
             ok, detail = await authenticate_provider(app, spec)
             if not ok:
+                # Cancelling re-auth on an already-ready provider is a
+                # benign "keep current config" — surface that, don't
+                # paint it as an error.
+                if state != "needs-setup" and detail == "cancelled":
+                    app.chat_pane.append_notice(
+                        f"{spec.display_name or new_id}: kept existing "
+                        f"credentials (cancelled).",
+                        kind="info",
+                    )
+                    return
                 app.chat_pane.append_notice(
                     f"{spec.display_name or new_id} authentication failed: "
                     f"{detail}. {hint}",

@@ -635,6 +635,29 @@ def _build_key_bindings(*, overlay, state, chat_pane, editor) -> KeyBindings:
                 top.set_query(current + data)
         event.app.invalidate()
 
+    # Bracketed paste arrives as a single ``<bracketed-paste>`` event with
+    # the pasted text in ``event.data``, NOT as individual character events
+    # — so the ``<any>`` handler above never sees it. Without this binding,
+    # pastes fall through to the default handler which inserts into the
+    # focused buffer (the editor at the bottom of the screen). That's why
+    # pasting an API key into an open InputDialogScreen ended up in the
+    # main editor textbox instead of the dialog.
+    @kb.add("<bracketed-paste>", filter=overlay_visible)
+    def _(event):
+        top = overlay.top
+        if top is None or not hasattr(top, "set_query"):
+            return
+        pasted = getattr(event, "data", "") or ""
+        # Strip newlines / control bytes — single-line input only. The
+        # auth flow further filters to printable-ASCII, so this is just
+        # belt-and-suspenders for renderable picker queries.
+        cleaned = "".join(c for c in pasted if c.isprintable())
+        if not cleaned:
+            return
+        current = getattr(top, "_query", "")
+        top.set_query(current + cleaned)
+        event.app.invalidate()
+
     # ── Chat scroll (PageUp/PageDown/Home/End) ───────────────────────────
     # All routes update chat_pane.user_scroll; the chat window's
     # get_vertical_scroll callback is the single scroll authority.
@@ -711,6 +734,15 @@ def _build_key_bindings(*, overlay, state, chat_pane, editor) -> KeyBindings:
         # ONE Esc closes the modal immediately. Without this the key
         # parser waited ~0.5s to see if a follow-up key arrived to form
         # 'Alt+...' — felt like Esc needed 2-3 presses to register.
+        # Give the screen a chance to resolve any pending future (the
+        # InputDialogScreen uses this to signal "cancel" to the awaiting
+        # caller); pickers without on_cancel just pop and forget.
+        top = overlay.top
+        if top is not None and hasattr(top, "on_cancel"):
+            try:
+                top.on_cancel()
+            except Exception:  # noqa: BLE001
+                pass
         overlay.pop()
         event.app.invalidate()
 

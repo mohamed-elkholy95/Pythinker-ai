@@ -84,6 +84,14 @@ class EditorPane:
     def __init__(self, on_submit: Callable[[str], Awaitable[None]]) -> None:
         self._on_submit = on_submit
         self._enabled = True
+        # Paste compaction registry. ``<bracketed-paste>`` events for big
+        # blocks get stored here keyed by an auto-incrementing id; the
+        # buffer only holds the placeholder ``[Pasted text #N +M lines]``,
+        # and ``submit()`` substitutes the real text back before sending
+        # to the agent. Keeps the visible composer compact even for
+        # multi-hundred-line pastes.
+        self._pastes: dict[int, str] = {}
+        self._paste_counter = 0
         # complete_while_typing is False so only our hook below opens the
         # menu — that keeps the popup deterministic without racing the
         # built-in auto-popup. select_first=True would visually highlight
@@ -124,12 +132,48 @@ class EditorPane:
             # application loop. In the real TUI, Application owns that loop.
             return
 
+    PASTE_PLACEHOLDER_RE = __import__("re").compile(
+        r"\[Pasted text #(\d+) \+\d+ lines?\]"
+    )
+
+    def register_paste(self, text: str) -> str:
+        """Stash ``text`` in the paste registry and return its placeholder.
+
+        Caller (the ``<bracketed-paste>`` keybinding in ``app.py``) inserts
+        the placeholder into the buffer instead of the raw paste so the
+        composer stays compact. ``submit()`` swaps every placeholder back
+        for the real text right before handing the turn to the agent.
+        """
+        self._paste_counter += 1
+        n = self._paste_counter
+        # Match Claude Code's wording: "+M lines" counts newlines, so a
+        # 50-line paste reports "+49 lines". Single-line big pastes show
+        # "+0 lines" which is correct (no newlines were swallowed).
+        line_count = text.count("\n")
+        self._pastes[n] = text
+        return f"[Pasted text #{n} +{line_count} lines]"
+
+    def _expand_pastes(self, text: str) -> str:
+        """Substitute every ``[Pasted text #N +M lines]`` placeholder for
+        the original text recorded under ``N``. Unknown ids pass through
+        unchanged so stray text that happens to look like a placeholder
+        survives the round trip."""
+        def _sub(match):
+            n = int(match.group(1))
+            return self._pastes.get(n, match.group(0))
+        return self.PASTE_PLACEHOLDER_RE.sub(_sub, text)
+
     async def submit(self) -> None:
-        """Extract buffer text, clear it, and invoke the submit callback."""
+        """Extract buffer text, expand pastes, clear, invoke callback."""
         text = self.buffer.text
         if self._enabled and text.strip():
             self.buffer.reset()
-            await self._on_submit(text)
+            expanded = self._expand_pastes(text)
+            # Reset the registry on every submit — placeholder ids are
+            # only meaningful for the current composer turn.
+            self._pastes.clear()
+            self._paste_counter = 0
+            await self._on_submit(expanded)
 
     def disable(self) -> None:
         self._enabled = False

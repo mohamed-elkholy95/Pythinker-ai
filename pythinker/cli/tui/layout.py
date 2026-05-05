@@ -204,14 +204,58 @@ def build_layout(
             right_margins=[ScrollbarMargin(display_arrows=False)],
             dont_extend_height=True,
         )
-    # Single-line input by default; grows up to 10 rows as the user types
-    # multi-line content. dont_extend_height prevents HSplit from flexing
-    # the editor beyond its preferred 1 row when filler exists. Matches
-    # Claude Code's compact prompt layout (one row between the rule lines).
+    # Single-line input by default; grows up to 3 rows as the user types
+    # or wraps multi-line content. With a static ``preferred=1`` the
+    # filler below absorbs all spare vertical space and HSplit pins the
+    # editor at one row, hiding wrapped continuation rows. Resolve that
+    # by computing ``preferred`` from the buffer's content per render —
+    # number of wrapped visual rows, clamped to [1, 3]. Past 3 rows the
+    # window stops growing and prompt_toolkit's built-in cursor-follow
+    # scrolling keeps the cursor visible inside the bounded area, so a
+    # large paste stays compact instead of swallowing the chat pane.
+    import math
+
+    from prompt_toolkit.application.current import get_app as _get_app
+
+    def _editor_height() -> Dimension:
+        buffer = editor_control.buffer
+        text = buffer.text or ""
+        try:
+            cols = _get_app().output.get_size().columns
+        except Exception:  # noqa: BLE001
+            cols = 80
+        # ``> `` prompt prefix on the first visual row of each logical
+        # line uses 2 columns; the hanging indent in
+        # ``_editor_line_prefix`` reserves another 2 columns for every
+        # wrapped continuation row. Both effective widths are cols-2.
+        usable = max(1, cols - 2)
+        rows = 0
+        for logical in text.split("\n"):
+            length = len(logical)
+            rows += max(1, math.ceil(length / usable)) if length else 1
+        # Cap at 15 visible rows — past that, prompt_toolkit's
+        # cursor-follow scrolling keeps the cursor in view inside the
+        # bounded area. Multi-line pastes don't trigger this branch
+        # because they're collapsed to a one-line placeholder by the
+        # ``<bracketed-paste>`` editor binding (see app.py); the cap
+        # only matters for typed Ctrl-J newlines or very long
+        # single-line pastes that wrap.
+        rows = max(1, min(15, rows))
+        return Dimension(min=rows, preferred=rows, max=15)
+
+    # Hang continuation rows under the first character of the typed
+    # text — i.e. two columns in, past the "> " prompt — instead of
+    # snapping back to column 0. Mirrors how Claude Code / Codex render
+    # wrapped composer lines so a long paste reads as one paragraph
+    # rather than a left-flush block.
+    def _editor_line_prefix(line_number: int, wrap_count: int):  # noqa: ARG001
+        return "  " if wrap_count else ""
+
     editor_window = Window(
         content=editor_control,
-        height=Dimension(min=1, preferred=1, max=10),
+        height=_editor_height,
         wrap_lines=True,
+        get_line_prefix=_editor_line_prefix,
         style="class:editor",
         dont_extend_height=True,
     )

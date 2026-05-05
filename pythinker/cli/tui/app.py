@@ -698,6 +698,54 @@ def _build_key_bindings(*, overlay, state, chat_pane, editor) -> KeyBindings:
 
     # ── Editor (only when no overlay is up) ──────────────────────────────
 
+    # Bracketed paste into the editor: multi-line blocks get compacted
+    # to ``[Pasted text #N +M lines]`` so a 200-line paste doesn't
+    # explode the composer. Single-line pastes (even very long ones)
+    # insert raw — the editor's dynamic height + wrap_lines handles
+    # them naturally and the user can still see / edit the content.
+    # Backspace at the end of a paste placeholder removes the whole
+    # ``[Pasted text #N +M lines]`` block in one keystroke and drops
+    # the underlying entry from the registry — matches Claude Code's
+    # behaviour where the placeholder is a single editable unit, not a
+    # bag of characters you have to chew through one Backspace at a
+    # time. Falls back to the default character-delete when the cursor
+    # isn't right after a placeholder, so normal typing still works.
+    @kb.add("backspace", filter=editor_focused_no_overlay)
+    def _(event):
+        from pythinker.cli.tui.panes.editor import EditorPane
+
+        buf = event.current_buffer
+        text_before = buf.document.text_before_cursor
+        matches = list(EditorPane.PASTE_PLACEHOLDER_RE.finditer(text_before))
+        if matches and matches[-1].end() == len(text_before):
+            m = matches[-1]
+            try:
+                n = int(m.group(1))
+                editor._pastes.pop(n, None)  # noqa: SLF001
+            except (ValueError, AttributeError):
+                pass
+            buf.delete_before_cursor(count=m.end() - m.start())
+            return
+        buf.delete_before_cursor(count=1)
+
+    @kb.add("<bracketed-paste>", filter=editor_focused_no_overlay)
+    def _(event):
+        pasted = getattr(event, "data", "") or ""
+        # Normalise line endings before deciding inline vs. placeholder —
+        # otherwise CRLF / CR-only pastes (common from web pages and
+        # Windows clipboards) sneak past the ``"\n" in pasted`` check
+        # and the raw \r chars render as ``^M`` glyphs in the editor.
+        pasted = pasted.replace("\r\n", "\n").replace("\r", "\n")
+        if "\n" in pasted:
+            placeholder = editor.register_paste(pasted)
+            event.current_buffer.insert_text(placeholder)
+        else:
+            # Strip any remaining control chars (some terminals include
+            # zero-width joiners or NULs that would also display as
+            # control glyphs) so single-line pastes stay clean.
+            cleaned = "".join(c for c in pasted if c == "\t" or c.isprintable())
+            event.current_buffer.insert_text(cleaned)
+
     @kb.add("enter", filter=editor_focused_no_overlay)
     def _(event):
         # Slash-command completion: when the popup is open with no real

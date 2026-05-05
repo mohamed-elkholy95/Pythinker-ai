@@ -16,9 +16,10 @@ from prompt_toolkit.layout.containers import (
 )
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.margins import ScrollbarMargin
-from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 from prompt_toolkit.widgets import Frame
+
+from pythinker.cli.tui.panes.completion_menu import HighlightFirstCompletionsMenu
 
 # Minimum mouse wheel step size, in rendered rows. 3 matches the convention
 # used by terminals (xterm, Alacritty, Kitty) and most editors when
@@ -270,7 +271,7 @@ def build_layout(
     completions_float = Float(
         xcursor=True,
         ycursor=True,
-        content=CompletionsMenu(max_height=12, scroll_offset=1),
+        content=HighlightFirstCompletionsMenu(max_height=12, scroll_offset=1),
     )
 
     floats = [

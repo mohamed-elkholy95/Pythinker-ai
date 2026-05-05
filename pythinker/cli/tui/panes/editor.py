@@ -84,10 +84,19 @@ class EditorPane:
     def __init__(self, on_submit: Callable[[str], Awaitable[None]]) -> None:
         self._on_submit = on_submit
         self._enabled = True
+        # complete_while_typing is False so only our hook below opens the
+        # menu — that keeps the popup deterministic without racing the
+        # built-in auto-popup. select_first=True would visually highlight
+        # the top match but prompt_toolkit implements selection by
+        # *inserting* the completion's text into the buffer (preview-mode);
+        # that breaks plain typing and Backspace because every text change
+        # re-fires this hook and re-inserts the preview. Instead the popup
+        # opens with no row selected, and Enter is bound to accept the top
+        # match when complete_state is active (see app.py).
         self.buffer = Buffer(
             multiline=True,
             completer=SlashCompleter(),
-            complete_while_typing=True,
+            complete_while_typing=False,
         )
         self.buffer.on_text_changed += self._refresh_slash_completion
         # Lead the buffer with a "> " prompt and dim placeholder text when

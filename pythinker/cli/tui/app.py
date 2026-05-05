@@ -677,6 +677,21 @@ def _build_key_bindings(*, overlay, state, chat_pane, editor) -> KeyBindings:
 
     @kb.add("enter", filter=editor_focused_no_overlay)
     def _(event):
+        # Slash-command completion: when the popup is open with no real
+        # selection (complete_index is None — our menu still paints row 0
+        # as current via HighlightFirstCompletionsMenu), accept the top
+        # match AND submit in the same keystroke. One Enter does both —
+        # the visual highlight tells the user which command will run.
+        # If the user wants to add args, the popup auto-closes the moment
+        # they type a space, so subsequent Enter just submits as usual.
+        buf = event.current_buffer
+        state_ = buf.complete_state
+        if (
+            state_ is not None
+            and state_.completions
+            and state_.complete_index is None
+        ):
+            buf.apply_completion(state_.completions[0])
         # Submit the editor buffer as a new turn. Retain the task so asyncio's
         # weak-task GC doesn't drop it mid-flight (Python 3.11+ docs).
         task = asyncio.create_task(editor.submit())

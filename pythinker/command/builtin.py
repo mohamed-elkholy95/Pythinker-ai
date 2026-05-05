@@ -20,6 +20,10 @@ import asyncio
 import os
 
 from pythinker.bus.events import OutboundMessage
+from pythinker.command.builtins.auth import (
+    cmd_login,
+    cmd_logout,
+)
 from pythinker.command.builtins.dream import (
     _extract_changed_files,  # noqa: F401  (kept for backwards compatibility)
     _format_changed_files,  # noqa: F401  (kept for backwards compatibility)
@@ -97,3 +101,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/dream-restore ", cmd_dream_restore)
     router.exact("/help", cmd_help)
     router.exact("/upgrade", cmd_upgrade)
+    router.exact("/login", cmd_login)
+    router.prefix("/login ", cmd_login)
+    router.exact("/logout", cmd_logout)
+    router.prefix("/logout ", cmd_logout)

@@ -66,4 +66,14 @@ BUILTIN_COMMAND_METADATA: tuple[CommandMeta, ...] = (
         "/upgrade",
         "Check PyPI and upgrade pythinker in place (then restart)",
     ),
+    CommandMeta(
+        "/login",
+        "Show OAuth auth state and how to (re-)authenticate",
+        usage="/login [provider]",
+    ),
+    CommandMeta(
+        "/logout",
+        "Delete the stored OAuth token for a provider",
+        usage="/logout <provider>",
+    ),
 )

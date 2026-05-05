@@ -3,18 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import os
-import subprocess
-import sys
 import types
 import webbrowser
-from dataclasses import dataclass, field
-from datetime import datetime
 from functools import lru_cache
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Literal, NamedTuple, get_args, get_origin
+from typing import Any, Callable, Literal, NamedTuple, get_args, get_origin
 
 import httpx
 
@@ -30,104 +24,43 @@ from rich.table import Table
 
 from pythinker.agent.tools.web import WebSearchTool
 from pythinker.cli.models import (
-    RECOMMENDED_BY_PROVIDER,
     format_token_count,
     get_model_context_limit,
     get_model_suggestions,
 )
-from pythinker.config.loader import get_config_path, load_config, save_config
+
+# Compatibility re-exports: tests patch and import the wizard's result types
+# off ``pythinker.cli.onboard``. The dataclasses live in ``onboard_types``
+# now; keep the names importable from this module.
+from pythinker.cli.onboard_auth import (  # noqa: F401
+    _login_via_oauth_remote,
+    _set_provider_api_key,
+)
+from pythinker.cli.onboard_options import (  # noqa: F401
+    _build_provider_options,
+    _format_provider_hint,
+    _model_belongs_to_provider,
+    _normalize_provider_id,
+    _provider_picker_bucket,
+    _resolve_model_route_hint,
+)
+from pythinker.cli.onboard_types import (  # noqa: F401
+    OnboardResult,
+    StepResult,
+    _WizardContext,
+)
+from pythinker.config.loader import (
+    get_config_path,
+    load_config,
+    save_config,  # noqa: F401  # patched on this module by tests
+)
 from pythinker.config.schema import (
     Config,
     WebSearchConfig,
     WebSearchProviderConfig,
 )
 
-if TYPE_CHECKING:
-    from pythinker.providers.registry import ProviderSpec
-
 console = Console()
-
-
-@dataclass
-class OnboardResult:
-    """Result of an onboarding session."""
-
-    config: Config
-    should_save: bool
-
-
-@dataclass(frozen=True)
-class StepResult:
-    """Result of a single wizard step.
-
-    ``status`` values:
-
-    - ``"continue"`` — proceed to the next step (or to ``next_step`` if set).
-    - ``"skip"`` — same as continue; semantic marker that the step had nothing
-      to do (e.g. step gated on QuickStart but flow is Manual).
-    - ``"abort"`` — stop the wizard, do not save. ``message`` is shown to the
-      user via ``clack.abort``.
-    - ``"back"`` — request the orchestrator to re-run the previous step.
-      Used by Task 5 (back-navigation across steps); the Task 1 orchestrator
-      treats this the same as ``"continue"`` so steps can start emitting it
-      ahead of the orchestrator support landing.
-
-    ``next_step`` is reserved for the back-nav work — when non-empty, the
-    orchestrator jumps to the named step instead of the default next-in-list.
-    Today it's accepted but unused.
-    """
-
-    status: Literal["continue", "skip", "abort", "back"]
-    message: str = ""
-    next_step: str = ""
-
-
-@dataclass
-class _WizardContext:
-    """Shared state threaded through every wizard step.
-
-    Field groupings (kept stable so phases 2–4 can extend without churn):
-
-    - **flow control**: ``flow``, ``non_interactive``, ``yes_security``,
-      ``use_existing``, ``use_existing_committed``, ``started_from_existing``.
-    - **provider/auth choice**: ``auth``, ``auth_method``.
-    - **runtime intents**: ``start_gateway``, ``skip_gateway``,
-      ``gateway_started``, ``open_webui``.
-    - **reset / migration**: ``reset_pending``, ``reset_scope``.
-    - **path overrides**: ``workspace_override``.
-    - **deferred side-effects** (``deferred``): callables a step registers to
-      run once the orchestrator finishes successfully — e.g. opening a
-      browser tab after the gateway is up. Drained by ``_run_linear_wizard``
-      after the last step returns; exceptions are logged, not raised.
-
-    Carries the linear-wizard state across steps at the data-shape level.
-    """
-
-    draft: Config
-    flow: str = "manual"
-    non_interactive: bool = False
-    yes_security: bool = False
-    auth: str | None = None
-    auth_method: str | None = None
-    start_gateway: bool | None = None
-    skip_gateway: bool = False
-    started_from_existing: bool = False
-    use_existing: bool = False
-    use_existing_committed: bool = False
-    reset_pending: bool = False
-    reset_scope: object | None = None
-    workspace_override: str | None = None
-    open_webui: bool = False
-    gateway_started: bool = False
-    deferred: list[Callable[[], None]] = field(default_factory=list)
-
-    def register_deferred(self, fn: Callable[[], None]) -> None:
-        """Register a fire-and-forget callback to run after the orchestrator
-        finishes successfully (i.e. no abort, no exception). Used by steps
-        that need work to land *after* a later step — e.g. opening the WebUI
-        browser tab once the gateway has bound its port. Order is registration
-        order; an exception in one deferred does not stop the others."""
-        self.deferred.append(fn)
 
 
 _WIZARD_STEPS: list[Callable[[_WizardContext], StepResult]] = []
@@ -239,60 +172,13 @@ def _run_linear_wizard(ctx: _WizardContext) -> OnboardResult:
 
 
 # --- Banner + Intro + Outro Steps ---
-
-_BANNER = r"""
-██████  ██    ██ ████████ ██   ██ ██ ███    ██ ██   ██ ███████ ██████
-██   ██  ██  ██     ██    ██   ██ ██ ████   ██ ██  ██  ██      ██   ██
-██████    ████      ██    ███████ ██ ██ ██  ██ █████   █████   ██████
-██         ██       ██    ██   ██ ██ ██  ██ ██ ██  ██  ██      ██   ██
-██         ██       ██    ██   ██ ██ ██   ████ ██   ██ ███████ ██   ██
-"""
-
-
-def _step_banner(ctx: _WizardContext) -> StepResult:
-    """Print the Pythinker ASCII banner + tagline."""
-    try:
-        cols = os.get_terminal_size().columns
-    except OSError:
-        cols = 80
-    if cols >= 60:
-        for line in _BANNER.strip("\n").splitlines():
-            console.print(line)
-        console.print("\n                       🐍 PYTHINKER 🐍\n")
-
-    from pythinker import __version__
-
-    console.print(f"🐍 Pythinker {__version__}")
-    console.print("   Personal AI agent framework. ~2 minutes.\n")
-    return StepResult(status="continue")
-
-
-def _step_intro(ctx: _WizardContext) -> StepResult:
-    """Open the persistent bar with the wizard title."""
-    from pythinker.cli.onboard_views import clack
-
-    clack.intro("Pythinker setup")
-    return StepResult(status="continue")
-
-
-def _step_outro(ctx: _WizardContext) -> StepResult:
-    """Close the bar with next-steps guidance.
-
-    Runs *before* ``_step_start_gateway`` (which execs into the gateway
-    and never returns), so the next-steps message is the last thing the
-    user sees before the gateway takes over the terminal. The
-    ``open_webui`` browser handoff was moved to ``_step_start_gateway``
-    where it can poll /health on the about-to-start gateway.
-    """
-    from pythinker.cli.onboard_views import clack
-
-    clack.outro("🐍 Pythinker is ready.")
-    console.print("\nNext:")
-    console.print("  pythinker agent       interactive chat")
-    console.print("  pythinker gateway     start channels + API")
-    console.print("  pythinker doctor      verify your setup anytime\n")
-    return StepResult(status="continue")
-
+# Step bodies live in ``onboard_steps.banner``; we re-export them so tests
+# importing them off ``pythinker.cli.onboard`` keep working.
+from pythinker.cli.onboard_steps.banner import (  # noqa: F401, E402
+    _step_banner,
+    _step_intro,
+    _step_outro,
+)
 
 _WIZARD_STEPS.extend([_step_banner, _step_intro])
 # _step_outro and _step_start_gateway are registered together at the
@@ -301,505 +187,44 @@ _WIZARD_STEPS.extend([_step_banner, _step_intro])
 
 
 # --- Step 3: Security Disclaimer ---
-
-
-def _step_security_disclaimer(ctx: _WizardContext) -> StepResult:
-    """Step 3 — security disclaimer + ack confirm."""
-    from pythinker.cli.onboard_views import risk_ack
-
-    if ctx.use_existing:
-        return StepResult(status="skip")
-    accepted = risk_ack.show_and_confirm(
-        yes_security=ctx.yes_security,
-        non_interactive=ctx.non_interactive,
-    )
-    if not accepted:
-        return StepResult(status="abort", message="security disclaimer not accepted")
-    return StepResult(status="continue")
-
+from pythinker.cli.onboard_steps.security_disclaimer import (  # noqa: F401, E402
+    _step_security_disclaimer,
+)
 
 _WIZARD_STEPS.append(_step_security_disclaimer)
 
 
 # --- Step 4: Existing Config Detection ---
-
-
-def _step_existing_config(ctx: _WizardContext) -> StepResult:
-    """Step 4 — detect existing config, offer Use/Update/Reset."""
-    from pythinker.cli.onboard_views import clack
-    from pythinker.cli.onboard_views import reset as _reset_views
-    from pythinker.cli.onboard_views import summary as _summary_views
-
-    cfg_path = get_config_path()
-    if not cfg_path.exists():
-        return StepResult(status="skip")
-
-    on_disk = load_config()
-    ctx.started_from_existing = True
-
-    if ctx.use_existing:
-        ctx.draft = on_disk
-        return StepResult(status="continue", next_step="_step_outro")
-
-    _summary_views.render_existing_summary(on_disk)
-
-    choice = clack.select(
-        "What would you like to do?",
-        options=[
-            ("use-existing", "Use existing", "Load current config; refresh new schema fields."),
-            ("update", "Update", "Walk the wizard; edit only what differs."),
-            ("reset", "Reset", "Back up current config, start from defaults."),
-        ],
-        default="use-existing",
-    )
-
-    if choice == "use-existing":
-        ctx.draft = on_disk
-        ctx.use_existing = True
-        return StepResult(status="continue", next_step="_step_outro")
-
-    if choice == "update":
-        ctx.draft = on_disk
-        return StepResult(status="continue")
-
-    # choice == "reset"
-    scope = _reset_views.prompt_scope()
-    if not _reset_views.confirm_typed():
-        return StepResult(status="abort", message="reset not confirmed")
-
-    _reset_views.apply_immediate(scope)
-    ctx.reset_pending = True
-    ctx.reset_scope = scope
-    ctx.draft = Config()
-    return StepResult(status="continue")
-
+from pythinker.cli.onboard_steps.existing_config import (  # noqa: F401, E402
+    _step_existing_config,
+)
 
 _WIZARD_STEPS.append(_step_existing_config)
 
 
-# --- Step 5: Flow Picker (QuickStart vs Manual) ---
-
-
-def _step_flow_picker(ctx: _WizardContext) -> StepResult:
-    """Step 5 — choose QuickStart vs Manual setup mode."""
-    from pythinker.cli.onboard_views import clack
-
-    if ctx.use_existing:
-        return StepResult(status="skip")
-
-    if ctx.non_interactive and ctx.flow == "manual":
-        # _WizardContext default for `flow` is "manual"; flip to quickstart
-        # when running non-interactively without an explicit --flow value.
-        ctx.flow = "quickstart"
-        return StepResult(status="continue")
-
-    if ctx.flow != "manual":
-        # User passed `--flow quickstart` (or some other explicit value).
-        return StepResult(status="continue")
-
-    chosen = clack.select(
-        "Setup mode",
-        options=[
-            ("quickstart", "QuickStart", "Minimal prompts. Defaults for workspace, gateway, channels."),
-            ("manual", "Manual", "Walk every section."),
-        ],
-        default="quickstart",
-    )
-    ctx.flow = chosen
-    return StepResult(status="continue")
-
+# --- Step 5: Flow Picker (QuickStart vs Manual) + Step 6: QuickStart summary ---
+from pythinker.cli.onboard_steps.flow_picker import (  # noqa: F401, E402
+    _step_flow_picker,
+    _step_quickstart_summary,
+)
 
 _WIZARD_STEPS.append(_step_flow_picker)
-
-
-def _step_quickstart_summary(ctx: _WizardContext) -> StepResult:
-    """Step 6 — show defaults preview when user picked QuickStart."""
-    from pythinker.cli.onboard_views import clack
-
-    if ctx.flow != "quickstart":
-        return StepResult(status="skip")
-
-    body = [
-        "Gateway port: 18790",
-        "Gateway bind: Loopback (127.0.0.1)",
-        "Workspace: ~/.pythinker/workspace",
-        "Channels: configured later via `pythinker onboard` (Manual mode).",
-        "Web search: deferred",
-    ]
-    clack.note("QuickStart", body)
-    clack.bar_break()
-    return StepResult(status="continue")
-
-
 _WIZARD_STEPS.append(_step_quickstart_summary)
 
 
-def _format_provider_hint(spec: "ProviderSpec") -> str:
-    """Format a one-line hint for a provider row.
-
-    Surfaces the auth style (OAuth / gateway / local / direct / API key),
-    the relevant env var or default endpoint, and a ``signup ↗`` marker
-    when the provider exposes a signup URL the wizard can deep-link to.
-    ``clack.select`` only takes one hint string, so we join the segments
-    with ' · '.
-    """
-    parts: list[str] = []
-    if getattr(spec, "is_oauth", False):
-        # OAuth wins the badge: no env var matters once browser-login is the path.
-        if spec.name == "openai_codex":
-            parts.append("OAuth · ChatGPT login")
-        elif spec.name == "github_copilot":
-            parts.append("OAuth · GitHub login")
-        else:
-            parts.append("OAuth")
-    elif getattr(spec, "is_direct", False):
-        parts.append("Direct · OpenAI-compatible endpoint")
-    elif getattr(spec, "is_local", False):
-        parts.append("Local")
-        if getattr(spec, "default_api_base", ""):
-            parts.append(spec.default_api_base)
-    elif getattr(spec, "is_gateway", False):
-        parts.append("Gateway")
-        if getattr(spec, "default_api_base", ""):
-            parts.append(spec.default_api_base)
-    elif getattr(spec, "env_key", ""):
-        parts.append(f"API key · {spec.env_key}")
-    if getattr(spec, "signup_url", ""):
-        parts.append("signup ↗")
-    return " · ".join(parts)
-
-
-def _provider_picker_bucket(spec: object) -> int:
-    """Sort key controlling the visual grouping of provider rows.
-
-    Lower = earlier. OAuth first (one-click), then direct/standard providers
-    (most users), then gateways, then local installs, then anything else.
-    Mirrors pythinker's ``sortFlowContributionsByLabel`` after stable bucket
-    grouping.
-    """
-    if getattr(spec, "is_oauth", False):
-        return 0
-    if getattr(spec, "is_direct", False):
-        return 1
-    if getattr(spec, "is_gateway", False):
-        return 3
-    if getattr(spec, "is_local", False):
-        return 4
-    return 2  # standard "API key" providers
-
-
-def _build_provider_options() -> list[tuple[str, str, str]]:
-    """Build the provider-picker options list with pythinker-style decorated hints.
-
-    Bucketed (OAuth → Direct → Standard → Gateway → Local) then alphabetically
-    sorted within each bucket for stable presentation. The hint column carries
-    auth style, endpoint, and a signup marker so the user can tell at a glance
-    *what* they're picking, not just *who*.
-    """
-    from pythinker.providers.registry import PROVIDERS
-
-    decorated = [
-        (
-            _provider_picker_bucket(spec),
-            (spec.display_name or spec.name).lower(),
-            (spec.name, spec.display_name or spec.name, _format_provider_hint(spec)),
-        )
-        for spec in PROVIDERS
-    ]
-    decorated.sort(key=lambda row: (row[0], row[1]))
-    options = [row[2] for row in decorated]
-    options.append(("skip", "Skip", "Configure later in config.json."))
-    return options
-
-
-def _step_provider_picker(ctx: _WizardContext) -> StepResult:
-    """Step 7 — pick the LLM provider from the registry.
-
-    Records the choice on `ctx.auth` so subsequent steps (auth-method picker,
-    run-auth) can dispatch on it. The actual mutation of the config schema
-    happens in Task 17 (run-auth) once the credential is in hand.
-    """
-    from pythinker.cli.onboard_views import clack
-
-    if ctx.non_interactive:
-        if ctx.auth in (None, "", "skip"):
-            ctx.auth = ctx.auth or "skip"
-            return StepResult(status="continue")
-        # auth already set explicitly — keep it.
-        return StepResult(status="continue")
-
-    options = _build_provider_options()
-    options.insert(0, ("__back__", "Back", "Return to the previous step"))
-    chosen = clack.select(
-        "Model/auth provider",
-        options=options,
-        default="openai_codex",
-        searchable=True,
-    )
-    if chosen == "__back__":
-        return StepResult(status="back")
-    ctx.auth = chosen
-    _emit_docs_link("provider")
-    return StepResult(status="continue")
-
+# --- Step 7: Provider Picker, Step 8: Auth Method Picker, Step 9: Run Auth ---
+from pythinker.cli.onboard_steps.provider_picker import (  # noqa: F401, E402
+    _step_auth_method_picker,
+    _step_provider_picker,
+    _step_run_auth,
+)
 
 _WIZARD_STEPS.append(_step_provider_picker)
-
-
-# --- Step 8: Auth Method Picker ---
-
-
-def _step_auth_method_picker(ctx: _WizardContext) -> StepResult:
-    """Step 8 — pick the auth method for the chosen provider.
-
-    Skipped when:
-      - ctx.auth is None or "skip"
-      - The provider's spec.auth_methods is empty (API-key-only providers)
-
-    Auto-picks (no prompt) when:
-      - spec.auth_methods has exactly one entry — emits a status line so the
-        user sees what got chosen.
-      - non_interactive mode — respects ctx.auth_method if set, else first entry.
-
-    Otherwise prompts via clack.select with the methods + a "Back" option.
-    """
-    from pythinker.cli.onboard_views import clack
-    from pythinker.providers.registry import PROVIDERS
-
-    if ctx.auth is None or ctx.auth == "skip":
-        return StepResult(status="skip")
-
-    spec = next((s for s in PROVIDERS if s.name == ctx.auth), None)
-    if spec is None or not spec.auth_methods:
-        return StepResult(status="skip")
-
-    if len(spec.auth_methods) == 1:
-        ctx.auth_method = spec.auth_methods[0].id
-        clack.print_status(f"Auth method: {spec.auth_methods[0].display}")
-        clack.bar_break()
-        return StepResult(status="continue")
-
-    if ctx.non_interactive:
-        ctx.auth_method = ctx.auth_method or spec.auth_methods[0].id
-        return StepResult(status="continue")
-
-    options: list[tuple[str, str, str]] = [
-        (m.id, m.display, m.hint) for m in spec.auth_methods
-    ]
-    options.insert(0, ("__back__", "Back", "Return to provider picker"))
-
-    chosen = clack.select(
-        f"{spec.display_name} auth method",
-        options=options,
-        default=spec.auth_methods[0].id,
-    )
-    if chosen == "__back__":
-        # Real back-nav now: orchestrator pops the history stack and re-runs
-        # the provider picker, so the user can pick a different provider.
-        return StepResult(status="back")
-
-    ctx.auth_method = chosen
-    return StepResult(status="continue")
-
-
 _WIZARD_STEPS.append(_step_auth_method_picker)
-
-
-def _login_via_oauth_remote(provider_name: str) -> None:
-    """Bridge to existing OAuth login handlers.
-
-    Looks up `_LOGIN_HANDLERS` from `pythinker.cli.commands` and calls the
-    matching handler.  Each registered handler emits an SSH-awareness hint via
-    ``pythinker.auth.oauth_remote.run_oauth_with_hint`` before opening the
-    browser, so SSH/headless users see the paste-fallback option upfront.
-
-    ``login_oauth_interactive`` (oauth_cli_kit) races a local callback server
-    against a stdin paste prompt, so the paste path works without any extra
-    timeout wrapper — the hint makes it discoverable.
-    """
-    from pythinker.cli.commands import _LOGIN_HANDLERS
-
-    handler = _LOGIN_HANDLERS.get(provider_name)
-    if handler is None:
-        raise RuntimeError(f"No OAuth handler registered for {provider_name}")
-    handler()
-
-
-def _set_provider_api_key(cfg: Config, provider_name: str, value: str) -> None:
-    """Set cfg.providers.<provider_name>.api_key.
-
-    Hyphenated provider names map to underscored attribute names.
-    Silently no-ops if the schema doesn't know this provider.
-    """
-    attr = provider_name.replace("-", "_")
-    pc = getattr(cfg.providers, attr, None)
-    if pc is None:
-        return
-    pc.api_key = value
-
-
-def _step_run_auth(ctx: _WizardContext) -> StepResult:
-    """Step 9 — execute the chosen auth method.
-
-    For OAuth providers (browser-login): calls _login_via_oauth_remote.
-    For API-key providers: prompts for the key with env-var indirection
-    (writes ${VAR_NAME} when the env var is set, literal otherwise).
-    """
-    from pythinker.cli.onboard_views import clack
-    from pythinker.providers.registry import PROVIDERS
-
-    if ctx.auth is None or ctx.auth == "skip":
-        return StepResult(status="skip")
-
-    # Normalize provider name: convert hyphens to underscores for registry lookup
-    normalized_name = ctx.auth.replace("-", "_") if ctx.auth else None
-    spec = next(
-        (s for s in PROVIDERS if s.name == normalized_name or s.name == ctx.auth),
-        None,
-    )
-    if spec is None:
-        return StepResult(status="skip")
-
-    method = ctx.auth_method or (
-        spec.auth_methods[0].id if spec.auth_methods else "api-key"
-    )
-
-    # Re-encountering an already-authenticated provider: ask before silently
-    # re-running the auth flow. Mirrors pythinker's promptConfiguredAction
-    # for the auth surface (Phase 1 task 4). The check intentionally inspects
-    # only credentials *already saved in the draft* (api_key set, or OAuth
-    # token file present) — env-var-only detection is handled by the existing
-    # "Use {env_key} env var (currently set)?" confirm further down, so we
-    # don't double-prompt on first-run env-var pickup. Suppressed in
-    # non-interactive mode so CI/headless runs default to "update" semantics.
-    if not ctx.non_interactive:
-        already_authed = False
-        try:
-            provider_cfg = getattr(ctx.draft.providers, normalized_name, None)
-            if spec.is_oauth:
-                from pythinker.auth import credential_source
-
-                if provider_cfg is not None:
-                    already_authed = credential_source(spec, provider_cfg) == "oauth"
-            else:
-                already_authed = bool(getattr(provider_cfg, "api_key", "") or "")
-        except Exception:  # noqa: BLE001
-            already_authed = False
-        if already_authed:
-            action = _prompt_configured_action(
-                f"{spec.display_name} auth",
-                supports_disable=False,  # API keys: clearing is a one-line edit; OAuth: separate logout flow.
-                update_text="Re-authenticate",
-                skip_text="Skip (keep current credential)",
-            )
-            if action == "skip":
-                clack.bar_break()
-                return StepResult(status="continue")
-            # action == "update" → fall through to the normal auth path.
-
-    if method == "browser-login":
-        prog = clack.progress(f"Awaiting browser login for {spec.display_name}")
-        try:
-            _login_via_oauth_remote(spec.name)
-            prog.stop(success_label=f"{spec.display_name} OAuth complete")
-            clack.bar_break()
-            return StepResult(status="continue")
-        except Exception as exc:  # noqa: BLE001
-            prog.stop(success_label="")  # silent stop; actionable panel follows
-            from pythinker.cli.onboard_views.errors import render_actionable
-
-            render_actionable(
-                what=f"Browser-login for {spec.display_name} failed: {exc}",
-                why="Without a credential we cannot continue — the wizard will abort.",
-                how=(
-                    f"Re-run `pythinker onboard` and retry, or use an API key flow if "
-                    f"{spec.display_name} supports one."
-                ),
-            )
-            return StepResult(status="abort", message=f"oauth failed: {exc}")
-
-    # API-key path. Check env var first.
-    env_value = os.environ.get(spec.env_key) if spec.env_key else None
-
-    if env_value and not ctx.non_interactive:
-        use_env = clack.confirm(
-            f"Use {spec.env_key} env var (currently set)?",
-            default=True,
-        )
-        if use_env:
-            _set_provider_api_key(ctx.draft, ctx.auth, f"${{{spec.env_key}}}")
-            return StepResult(status="continue")
-
-    if ctx.non_interactive:
-        if not env_value:
-            sys.stderr.write(
-                f"--auth {ctx.auth} requires {spec.env_key} env var to be set\n"
-            )
-            sys.exit(1)
-        _set_provider_api_key(ctx.draft, ctx.auth, f"${{{spec.env_key}}}")
-        return StepResult(status="continue")
-
-    pasted = clack.text(f"Paste your {spec.display_name} API key:")
-    if not pasted.strip():
-        return StepResult(status="abort", message="no api key provided")
-    _set_provider_api_key(ctx.draft, ctx.auth, pasted.strip())
-    return StepResult(status="continue")
-
-
 _WIZARD_STEPS.append(_step_run_auth)
 
 
 # --- Step 10: Default Model Picker ---
-
-
-def _normalize_provider_id(provider: str) -> str:
-    """Normalize provider ids so ``openai-codex`` and ``openai_codex`` collide."""
-    return (provider or "").strip().lower().replace("-", "_")
-
-
-def _model_belongs_to_provider(model: str, provider: str) -> bool:
-    """Best-effort check: does ``model`` look like it belongs to ``provider``?
-
-    Used to spot "user kept their old MiniMax model id but just switched the
-    provider to OpenAI Codex" so we don't preselect an incompatible default.
-    Errs conservative — false negatives only cost one extra picker step.
-    """
-    from pythinker.providers.registry import PROVIDERS
-
-    if not model or not provider:
-        return False
-
-    norm_provider = _normalize_provider_id(provider)
-    needle = model.lower()
-    spec = next(
-        (p for p in PROVIDERS if _normalize_provider_id(p.name) == norm_provider),
-        None,
-    )
-    if spec is not None:
-        if any(kw and kw in needle for kw in spec.keywords):
-            return True
-    recommended = RECOMMENDED_BY_PROVIDER.get(norm_provider) or RECOMMENDED_BY_PROVIDER.get(
-        provider, ()
-    )
-    if model in recommended:
-        return True
-    if "/" in needle and spec is not None:
-        prefix = needle.split("/", 1)[0].replace("_", "-")
-        if prefix == _normalize_provider_id(spec.name).replace("_", "-"):
-            return True
-    return False
-
-
-def _resolve_model_route_hint(provider: str) -> str:
-    """Per-provider one-word route label, mirrors pythinker's ``resolveModelRouteHint``."""
-    norm = _normalize_provider_id(provider)
-    if norm == "openai":
-        return "API key route"
-    if norm == "openai_codex":
-        return "ChatGPT OAuth route"
-    if norm == "github_copilot":
-        return "GitHub OAuth route"
-    return ""
 
 
 _KEEP_KEY = "__keep__"
@@ -807,125 +232,13 @@ _MANUAL_KEY = "__manual__"
 _BACK_KEY = "__back__"
 
 
-def _step_default_model(ctx: _WizardContext) -> StepResult:
-    """Step 10 — pick the default model.
-
-    * One single picker with all candidate models inlined as top-level
-      options, plus ``Keep current`` and ``Enter model manually`` at the
-      top. The user picks the actual model in one step, no meta-menu.
-    * The initial highlight defaults to ``Keep current`` when the carried-
-      over ``defaults.model`` belongs to the just-selected provider.
-      Otherwise it jumps to the first recommended model for the new
-      provider — so a user who just authed Codex sees the cursor on a
-      codex model, not on the stale MiniMax one.
-    * Each row carries a hint: ``recommended``, ``current``, the route
-      hint (e.g. ``ChatGPT OAuth route``), or ``current (not in catalog)``
-      for the user's existing model when it's outside the curated list.
-    """
-    from pythinker.cli.onboard_views import clack
-
-    if ctx.auth is None or ctx.auth == "skip":
-        return StepResult(status="skip")
-
-    if ctx.non_interactive:
-        return StepResult(status="continue")
-
-    provider_label = ctx.auth
-    current = ctx.draft.agents.defaults.model or ""
-    suggestions = get_model_suggestions("", provider=ctx.auth) or []
-    keep_compatible = bool(current) and _model_belongs_to_provider(current, ctx.auth)
-    route_hint = _resolve_model_route_hint(ctx.auth)
-
-    options: list[tuple[str, str, str]] = []
-    options.append((_BACK_KEY, "Back", "Return to the previous step"))
-    if current:
-        keep_label = f"Keep current ({current})"
-        keep_hint = "" if keep_compatible else f"warning: not an {provider_label} model"
-        options.append((_KEEP_KEY, keep_label, keep_hint))
-    options.append((_MANUAL_KEY, "Enter model manually", ""))
-
-    seen: set[str] = set()
-    for i, model_id in enumerate(suggestions):
-        if model_id in seen:
-            continue
-        seen.add(model_id)
-        hints: list[str] = []
-        if i == 0:
-            hints.append("recommended")
-        if model_id == current:
-            hints.append("current")
-        if route_hint:
-            hints.append(route_hint)
-        options.append((model_id, model_id, " · ".join(hints)))
-
-    # Surface the user's existing model even if it's outside the curated list,
-    # so "current (not in catalog)" stays selectable rather than vanishing.
-    if current and current not in seen and not keep_compatible:
-        options.append((current, current, "current (not in catalog)"))
-
-    if keep_compatible:
-        default_id = _KEEP_KEY
-    elif suggestions:
-        default_id = suggestions[0]
-    elif current:
-        default_id = _KEEP_KEY
-    else:
-        default_id = _MANUAL_KEY
-
-    title = f"Default model (provider: {provider_label})" if provider_label else "Default model"
-    picked = clack.select(title, options=options, default=default_id, searchable=True)
-
-    if picked == _BACK_KEY:
-        return StepResult(status="back")
-    if picked == _KEEP_KEY:
-        return StepResult(status="continue")
-    if picked == _MANUAL_KEY:
-        seed = current if keep_compatible else ""
-        entered = clack.text("Model id:", default=seed)
-        if entered.strip():
-            ctx.draft.agents.defaults.model = entered.strip()
-        return StepResult(status="continue")
-
-    ctx.draft.agents.defaults.model = picked
-    return StepResult(status="continue")
-
+# --- Step 10: Default model picker, Step 11: Workspace ---
+from pythinker.cli.onboard_steps.default_model import (  # noqa: F401, E402
+    _step_default_model,
+    _step_workspace,
+)
 
 _WIZARD_STEPS.append(_step_default_model)
-
-
-def _step_workspace(ctx: _WizardContext) -> StepResult:
-    """Step 11 — workspace directory: mkdir, verify writable, re-prompt on failure."""
-    from pythinker.cli.onboard_views import clack
-
-    default = (
-        ctx.workspace_override
-        or ctx.draft.agents.defaults.workspace
-        or "~/.pythinker/workspace"
-    )
-
-    while True:
-        if ctx.non_interactive:
-            entered = default
-        else:
-            entered = clack.text("Workspace directory:", default=default)
-        path = Path(entered).expanduser()
-        try:
-            path.mkdir(parents=True, exist_ok=True)
-            probe = path / ".doctor-probe"
-            probe.write_text("x")
-            probe.unlink()
-            ctx.draft.agents.defaults.workspace = str(path)
-            return StepResult(status="continue")
-        except (PermissionError, OSError) as exc:
-            if ctx.non_interactive:
-                return StepResult(
-                    status="abort",
-                    message=f"workspace not writable: {exc}",
-                )
-            clack.print_status(f"✗ {exc}")
-            # Loop and re-prompt.
-
-
 _WIZARD_STEPS.append(_step_workspace)
 
 
@@ -997,534 +310,30 @@ def _prompt_configured_channel_action(label: str) -> str:
     return _prompt_configured_action(label, supports_disable=True)
 
 
-def _step_channels(ctx: _WizardContext) -> StepResult:
-    """Step 12 — channel picker loop.
-
-    Skipped in QuickStart. Manual flow:
-      1) Show "How channels work" panel.
-      2) Loop: pick a channel from the dynamically-discovered registry
-         (telegram, discord, slack, email, matrix, msteams, whatsapp, websocket),
-         show its instructions if available, then run the full per-field
-         pydantic walker (`_configure_channel`) on its config.
-      3) "Done" returns to the main wizard flow.
-
-    Channels come from `pythinker.channels.registry` so the wizard never
-    lags the codebase, and the per-channel editor covers every field the
-    channel exposes — not just the auth token.
-    """
-    from pythinker.cli.onboard_views import clack
-    from pythinker.cli.onboard_views.panels import CHANNEL_INSTRUCTIONS, CHANNELS_INTRO
-
-    if ctx.flow != "manual":
-        return StepResult(status="skip")
-
-    clack.note("How channels work", CHANNELS_INTRO)
-    clack.bar_break()
-
-    channel_names = _get_channel_names()  # {registry_key: display_name}
-    if not channel_names:
-        clack.print_status("No channels available — skipping channel setup.")
-        return StepResult(status="continue")
-
-    while True:
-        options: list[tuple[str, str, str]] = []
-        for name, display in channel_names.items():
-            ch = getattr(ctx.draft.channels, name, None)
-            enabled = bool(ch) and (
-                ch.get("enabled") if isinstance(ch, dict) else getattr(ch, "enabled", False)
-            )
-            hint = "configured" if enabled else ""
-            options.append((name, display, hint))
-        options.append(("__done__", "Done — continue setup", ""))
-
-        try:
-            picked = clack.select(
-                "Configure a channel",
-                options=options,
-                default="__done__",
-                searchable=True,
-            )
-        except clack.WizardCancelled:
-            break
-
-        if picked == "__done__":
-            break
-
-        # When a channel is already enabled, ask the user what they want to do
-        # before silently dropping into the editor — they may have just wanted
-        # to disable it, or to leave it alone after re-checking.
-        if _channel_is_enabled(ctx.draft, picked):
-            display = channel_names.get(picked, picked.title())
-            action = _prompt_configured_channel_action(display)
-            if action == "skip":
-                clack.bar_break()
-                continue
-            if action == "disable":
-                _set_channel_enabled(ctx.draft, picked, False)
-                clack.print_status(f"{display} disabled (config kept).")
-                clack.bar_break()
-                continue
-            # action == "update" → fall through to the editor below.
-
-        instr = CHANNEL_INSTRUCTIONS.get(picked)
-        if instr:
-            clack.note(f"{channel_names.get(picked, picked.title())} setup", instr)
-            clack.bar_break()
-
-        # Reuse the existing per-field pydantic walker; it covers
-        # every field on the channel's config class (token, allowlists, polling
-        # intervals, webhook URLs, …) rather than just the auth token.
-        try:
-            _configure_channel(ctx.draft, picked)
-        except KeyboardInterrupt:
-            clack.print_status(f"{channel_names.get(picked, picked)} edit cancelled.")
-            continue
-
-        clack.bar_break()
-
-    _emit_docs_link("channels")
-    return StepResult(status="continue")
-
+# --- Step 12: Channels picker, Step 13: Search provider picker ---
+from pythinker.cli.onboard_steps.channels import _step_channels  # noqa: F401, E402
+from pythinker.cli.onboard_steps.search_provider import (  # noqa: F401, E402
+    _step_search_provider,
+)
 
 _WIZARD_STEPS.append(_step_channels)
-
-
-def _step_search_provider(ctx: _WizardContext) -> StepResult:
-    """Step 13 — search provider picker (Manual only).
-
-    QuickStart defers search-provider config. Manual mode shows a single-select
-    over known providers; chosen provider's API key is read either as inline
-    paste or as ${VAR} env-var indirection (heuristic: looks like ENV_VAR_NAME).
-
-    Re-run behavior: when a draft already carries a search provider with an
-    api_key, the picker is pre-defaulted to that provider, "(configured)" hints
-    are shown next to providers that already have a credential, and an explicit
-    "Keep current" option is offered so users don't have to re-paste a key just
-    to walk through the wizard. Without this the previous flow always reset to
-    Tavily-default and re-prompted, which surfaced as "I pasted the key but it
-    didn't save" (it had — the user just hit Enter on the next re-paste).
-    """
-    from pythinker.cli.onboard_views import clack
-
-    if ctx.flow != "manual":
-        return StepResult(status="skip")
-
-    current_provider, configured_providers = _read_search_provider_state(ctx.draft)
-
-    def _label(opt_id: str, base: str, hint: str) -> tuple[str, str]:
-        if opt_id in configured_providers:
-            base += "  (configured)"
-        return base, hint
-
-    options: list[tuple[str, str, str]] = []
-    for opt_id, base, hint in (
-        ("tavily", "Tavily Search", "TAVILY_API_KEY · structured results"),
-        ("brave", "Brave Search", "BRAVE_API_KEY"),
-        ("perplexity", "Perplexity Search", "PERPLEXITY_API_KEY"),
-    ):
-        display, h = _label(opt_id, base, hint)
-        options.append((opt_id, display, h))
-    if current_provider in configured_providers:
-        options.insert(0, ("__keep__", f"Keep current ({current_provider})", "no changes"))
-    options.append(("skip", "Skip for now", ""))
-
-    default = "__keep__" if current_provider in configured_providers else (
-        current_provider if current_provider else "tavily"
-    )
-    chosen = clack.select(
-        "Search provider", options=options, default=default, searchable=True
-    )
-
-    if chosen in ("skip", "__keep__"):
-        return StepResult(status="continue")
-
-    pasted = clack.text(f"{chosen} API key (or env var name like TAVILY_API_KEY):")
-    pasted = pasted.strip()
-    if not pasted:
-        # Empty input + the user already had a key for this provider = keep it,
-        # but still flip the active provider to their new pick so the agent uses it.
-        if chosen in configured_providers:
-            _activate_search_provider(ctx.draft, chosen)
-            clack.print_status(f"Search provider: {chosen} (kept existing key)")
-        return StepResult(status="continue")
-
-    if not pasted.startswith("${") and pasted.isupper() and "_" in pasted:
-        # Heuristic: looks like an env var name; wrap in ${} for loader expansion.
-        pasted = f"${{{pasted}}}"
-
-    _write_search_provider_key(ctx.draft, chosen, pasted)
-    clack.print_status(f"Search provider: {chosen}")
-    _emit_docs_link("search")
-    return StepResult(status="continue")
-
-
-def _read_search_provider_state(cfg: Config) -> tuple[str | None, set[str]]:
-    """Return (active_provider_name, set_of_provider_names_with_api_key).
-
-    Tolerates schema mismatches by walking with getattr/hasattr — same defensive
-    pattern as ``_write_search_provider_key`` so this never raises mid-wizard.
-    """
-    tools = getattr(cfg, "tools", None)
-    web = getattr(tools, "web", None) if tools else None
-    search = getattr(web, "search", None) if web else None
-    if search is None:
-        return None, set()
-
-    active = getattr(search, "provider", None) or None
-    providers = getattr(search, "providers", None) or {}
-    configured = {
-        name
-        for name, slot in providers.items()
-        if getattr(slot, "api_key", "") or getattr(slot, "apiKey", "")
-    }
-    return active, configured
-
-
-def _activate_search_provider(cfg: Config, provider_name: str) -> None:
-    """Flip the active search provider without touching credentials."""
-    tools = getattr(cfg, "tools", None)
-    web = getattr(tools, "web", None) if tools else None
-    search = getattr(web, "search", None) if web else None
-    if search is not None and hasattr(search, "provider"):
-        search.provider = provider_name
-
-
-def _write_search_provider_key(cfg: Config, provider_name: str, value: str) -> None:
-    """Write the chosen search provider's API key into the config draft.
-
-    Uses defensive getattr/hasattr to avoid crashing on schema mismatches.
-    Adapt based on what the schema actually exposes.
-    """
-    # Schema path: cfg.tools.web.search.providers[provider_name].api_key
-    search_cfg = getattr(cfg, "tools", None)
-    if search_cfg is None:
-        return
-
-    search_cfg = getattr(search_cfg, "web", None)
-    if search_cfg is None:
-        return
-
-    search_cfg = getattr(search_cfg, "search", None)
-    if search_cfg is None:
-        return
-
-    providers = getattr(search_cfg, "providers", None)
-    if providers is None:
-        return
-
-    # Create or update the provider config
-    if provider_name not in providers:
-        from pythinker.config.schema import WebSearchProviderConfig
-
-        providers[provider_name] = WebSearchProviderConfig()
-
-    provider_cfg = providers[provider_name]
-    if hasattr(provider_cfg, "api_key"):
-        provider_cfg.api_key = value
-
-    # Activate the picked provider — without this, the agent keeps using whatever
-    # was previously selected (default: duckduckgo) even after the user gives a key.
-    if hasattr(search_cfg, "provider"):
-        search_cfg.provider = provider_name
-
-
 _WIZARD_STEPS.append(_step_search_provider)
 
 
-def _step_summary_confirm(ctx: _WizardContext) -> StepResult:
-    """Step 14 — pre-save summary + Save / Skip decision.
-
-    Performs the deferred reset rename atomically with the save when
-    `ctx.reset_pending` is set. The destructive credential/session deletes
-    happened immediately at step 4 (Task 12), so step 14 only handles the
-    config.json → config.json.bak.<ts> rename.
-    """
-    from pythinker.cli.onboard_views import clack
-    from pythinker.cli.onboard_views.summary import render_pre_save, render_pre_save_diff
-
-    render_pre_save(ctx.draft)
-
-    # Diff against the on-disk version when there is one — gives the user a
-    # last-chance audit of exactly what's about to change. Mirrors pythinker's
-    # pre-save diff panel (Phase 1 task 6). Best-effort: any IO/parse failure
-    # silently degrades to the no-diff path (we never block save on it).
-    try:
-        existing_path = get_config_path()
-        if existing_path.exists():
-            old_cfg = load_config(existing_path)
-            render_pre_save_diff(old_cfg, ctx.draft)
-    except Exception:  # noqa: BLE001
-        pass
-
-    if ctx.non_interactive:
-        chosen = "save"
-    else:
-        chosen = clack.select(
-            "Save?",
-            options=[
-                ("save", "Save and exit", ""),
-                ("skip", "Skip — discard changes", ""),
-            ],
-            default="save",
-        )
-
-    if chosen == "skip":
-        return StepResult(status="abort", message="user skipped at summary")
-
-    cfg_path = get_config_path()
-    old_sha = (
-        hashlib.sha256(cfg_path.read_bytes()).hexdigest()[:12]
-        if cfg_path.exists()
-        else None
-    )
-    if ctx.reset_pending and cfg_path.exists():
-        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        cfg_path.rename(cfg_path.with_name(f"config.json.bak.{ts}"))
-
-    try:
-        save_config(ctx.draft, cfg_path)
-    except OSError as exc:
-        from pythinker.cli.onboard_views.errors import render_actionable
-
-        render_actionable(
-            what=f"Could not write config to {cfg_path}: {exc}",
-            why="The wizard reached the save step but the filesystem refused the write.",
-            how=(
-                f"Check that {cfg_path.parent} exists and is writable, then re-run "
-                "`pythinker onboard`. Common fixes: `mkdir -p` the parent, fix permissions, "
-                "or pass `--config <other-path>` to land elsewhere."
-            ),
-        )
-        return StepResult(status="abort", message=f"config save failed: {exc}")
-    # User walked all the way through and confirmed save — clear the "use existing"
-    # flag so _run_linear_wizard's final-return override doesn't report
-    # should_save=False and trigger commands.py's "Configuration discarded" footer.
-    ctx.use_existing = False
-    new_sha = (
-        hashlib.sha256(cfg_path.read_bytes()).hexdigest()[:12]
-        if cfg_path.exists()
-        else None
-    )
-    if new_sha is None:
-        clack.print_status(f"Saved {cfg_path}")
-    elif old_sha is not None:
-        if old_sha == new_sha:
-            # Identical bytes before/after = the wizard re-validated and
-            # rewrote the same config. The user almost certainly intends
-            # "I edited something" — surfacing "no fields changed" lets
-            # them tell at a glance whether their save was a real edit
-            # or a Keep-current / silent-discard no-op (the latter is the
-            # symptom that triggered the Esc-saves-edits investigation
-            # earlier in the session — guard the regression).
-            clack.print_status(
-                f"Updated {cfg_path} (sha256 {old_sha} — no fields changed)"
-            )
-        else:
-            clack.print_status(f"Updated {cfg_path} (sha256 {old_sha} -> {new_sha})")
-    else:
-        clack.print_status(f"Saved {cfg_path} (sha256 {new_sha})")
-    clack.bar_break()
-    return StepResult(status="continue")
-
+# --- Step 14: Summary + save, Step 15: Post-save health, Step 16: Start gateway ---
+from pythinker.cli.onboard_steps.post_save_health import (  # noqa: F401, E402
+    _check_gateway_port_free,
+    _step_post_save_health,
+)
+from pythinker.cli.onboard_steps.start_gateway import (  # noqa: F401, E402
+    _step_start_gateway,
+)
+from pythinker.cli.onboard_steps.summary_confirm import (  # noqa: F401, E402
+    _step_summary_confirm,
+)
 
 _WIZARD_STEPS.append(_step_summary_confirm)
-
-
-# --- Step 15: Post-save health check ---
-
-
-def _check_gateway_port_free(host: str, port: int) -> tuple[str, str]:
-    """Best-effort port preflight that does NOT exit. Returns ``(status, detail)``
-    where status is ``"ok"`` / ``"warn"`` / ``"error"``. Used by the post-save
-    health check so a port conflict shows up as a warning (config is fine,
-    the user just needs to free the port before starting the gateway), not
-    as a hard failure on the wizard."""
-    import errno
-    import socket
-
-    bind_host = host or "127.0.0.1"
-    fam = socket.AF_INET6 if ":" in bind_host else socket.AF_INET
-    sock = socket.socket(fam, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    try:
-        sock.bind((bind_host, port))
-    except OSError as exc:
-        sock.close()
-        if exc.errno == errno.EADDRINUSE:
-            return ("warn", f"{bind_host}:{port} already in use")
-        if exc.errno == errno.EACCES:
-            return ("warn", f"{bind_host}:{port} permission denied")
-        return ("warn", f"bind failed ({exc.errno})")
-    sock.close()
-    return ("ok", f"{bind_host}:{port} free")
-
-
-def _step_post_save_health(ctx: _WizardContext) -> StepResult:
-    """Step 15 — green/yellow/red health check on the just-saved config.
-
-    Inlines the relevant subset of ``pythinker doctor`` so the wizard ends
-    on a confidence-building summary rather than dropping the user back at
-    the shell.
-
-    Skipped when the user discarded changes (``use_existing`` and no save).
-    Provider-ping is intentionally NOT included by default — making a
-    network call as the last step of onboarding hides cost and would
-    slow headless installs. Add it later behind an opt-in flag.
-    """
-    from pythinker.cli.doctor import (
-        _check_default_model,
-        _check_default_provider_auth,
-        _check_workspace,
-    )
-    from pythinker.cli.onboard_views import clack
-
-    if ctx.use_existing:
-        return StepResult(status="skip")
-
-    glyph = {"ok": "✓", "warn": "⚠", "error": "✗"}
-
-    def _emit(status: str, label: str, detail: str = "", fix: str = "") -> None:
-        line = f"{glyph.get(status, '?')} {label}"
-        if detail:
-            line += f": {detail}"
-        clack.print_status(line)
-        if fix and status != "ok":
-            clack.print_status(f"  Fix: {fix}")
-
-    clack.print_status("Health check:")
-    try:
-        ws = _check_workspace()
-        _emit(ws.status, ws.label, ws.detail, ws.fix)
-    except Exception as exc:  # noqa: BLE001
-        _emit("warn", "Workspace", f"check skipped ({exc})")
-
-    try:
-        model = _check_default_model()
-        _emit(model.status, model.label, model.detail, model.fix)
-    except Exception as exc:  # noqa: BLE001
-        _emit("warn", "Default model", f"check skipped ({exc})")
-
-    try:
-        for auth_result in _check_default_provider_auth():
-            _emit(auth_result.status, auth_result.label, auth_result.detail, auth_result.fix)
-    except Exception as exc:  # noqa: BLE001
-        _emit("warn", "Provider auth", f"check skipped ({exc})")
-
-    try:
-        port_status, port_detail = _check_gateway_port_free(
-            ctx.draft.gateway.host, ctx.draft.gateway.port
-        )
-        _emit(port_status, "Gateway port", port_detail)
-    except Exception as exc:  # noqa: BLE001
-        _emit("warn", "Gateway port", f"check skipped ({exc})")
-
-    clack.bar_break()
-    return StepResult(status="continue")
-
-
 _WIZARD_STEPS.append(_step_post_save_health)
-
-
-# --- Step 16: Start Gateway (Optional) ---
-
-
-def _step_start_gateway(ctx: _WizardContext) -> StepResult:
-    """Step 16 — optionally hand control to the gateway in the foreground.
-
-    Replaces the wizard process with ``pythinker gateway`` via ``os.execvp``
-    so the user sees gateway logs directly, can Ctrl-C cleanly, and no
-    orphan PID is left behind. Background spawning was the previous
-    behavior — it produced two long-running UX issues:
-
-      * stdout/stderr were sent to /dev/null, so first-time users saw
-        nothing after onboard finished and had no way to tell whether the
-        gateway had actually started.
-      * The orphaned PID kept running with the wizard's just-saved config
-        loaded once at startup, so any later config edit appeared to "not
-        save" until the user manually killed and restarted the process.
-
-    Skipped when --skip-gateway is set, or in non-interactive mode unless
-    --start-gateway is passed. Outro runs *before* this step (see step
-    registration below) so the next-steps message survives the exec.
-    """
-    from pythinker.cli.onboard_views import clack
-
-    if ctx.use_existing or ctx.skip_gateway:
-        return StepResult(status="continue")
-
-    if ctx.start_gateway is None and ctx.non_interactive:
-        return StepResult(status="continue")
-
-    if ctx.start_gateway is None:
-        chosen = clack.select(
-            "Start the gateway now?",
-            options=[
-                ("yes", "Yes, start it now (Ctrl-C to stop)", ""),
-                ("no", "No, I'll start it later", ""),
-            ],
-            default="yes",
-        )
-        if chosen == "no":
-            clack.print_status("Start it later with: pythinker gateway")
-            return StepResult(status="continue")
-
-    # Resolve port (best-effort; default 18790).
-    port_num = ctx.draft.gateway.port
-
-    # Best-effort browser open: spawn a tiny detached helper that polls
-    # /health and opens the URL once the gateway responds. Survives the
-    # upcoming execvp because it's its own session.
-    if ctx.open_webui:
-        try:
-            subprocess.Popen(
-                [
-                    sys.executable,
-                    "-c",
-                    (
-                        "import time, urllib.request, webbrowser\n"
-                        f"url = 'http://127.0.0.1:{port_num}'\n"
-                        f"health = 'http://127.0.0.1:{port_num}/health'\n"
-                        "deadline = time.monotonic() + 15.0\n"
-                        "while time.monotonic() < deadline:\n"
-                        "    try:\n"
-                        "        urllib.request.urlopen(health, timeout=0.4)\n"
-                        "        webbrowser.open(url)\n"
-                        "        break\n"
-                        "    except Exception:\n"
-                        "        time.sleep(0.5)\n"
-                    ),
-                ],
-                start_new_session=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception as exc:  # noqa: BLE001
-            clack.print_status(f"○ Could not schedule browser open: {exc}")
-
-    clack.print_status(f"Starting gateway on port {port_num} — Ctrl-C to stop")
-
-    # Replace the wizard process. From this point on, output is the
-    # gateway's. Anything after this line never executes on success.
-    try:
-        os.execvp(sys.executable, [sys.executable, "-m", "pythinker", "gateway"])
-    except OSError as exc:
-        from pythinker.cli.onboard_views.errors import render_actionable
-
-        render_actionable(
-            what=f"Could not start gateway: {exc}",
-            why=(
-                "The wizard finished saving config but the gateway process "
-                "failed to launch — your settings are saved, just not yet running."
-            ),
-            how=(
-                "Start it manually with `pythinker gateway`. If that also fails, "
-                "check that the configured port is free and that the python "
-                "interpreter is on PATH."
-            ),
-        )
-        return StepResult(status="continue")
-
-
 # Outro before start_gateway: start_gateway execs into the gateway and never
 # returns, so any post-exec step (including the outro's next-steps message)
 # would silently be dropped if the order were reversed.

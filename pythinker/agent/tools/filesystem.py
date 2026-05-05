@@ -1,4 +1,12 @@
-"""File system tools: read, write, edit, list."""
+"""File system tools: read, write, edit, list.
+
+Shared guard helpers (workspace-restriction, path resolution, device-path
+blocking, the ``_FsTool`` base class) live in ``filesystem_guard.py`` and
+are re-exported below so existing imports of
+``pythinker.agent.tools.filesystem._resolve_path`` /``_FsTool`` /
+``_is_under`` /``_BLOCKED_DEVICE_PATHS`` /``_is_blocked_device`` keep
+working.
+"""
 
 import difflib
 import mimetypes
@@ -8,7 +16,14 @@ from pathlib import Path
 from typing import Any
 
 from pythinker.agent.tools import file_state
-from pythinker.agent.tools.base import Tool, tool_parameters
+from pythinker.agent.tools.base import tool_parameters
+from pythinker.agent.tools.filesystem_guard import (
+    _BLOCKED_DEVICE_PATHS,
+    _FsTool,
+    _is_blocked_device,
+    _is_under,
+    _resolve_path,
+)
 from pythinker.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
@@ -18,86 +33,24 @@ from pythinker.agent.tools.schema import (
 from pythinker.config.paths import get_media_dir
 from pythinker.utils.helpers import build_image_content_blocks, detect_image_mime
 
-
-def _resolve_path(
-    path: str,
-    workspace: Path | None = None,
-    allowed_dir: Path | None = None,
-    extra_allowed_dirs: list[Path] | None = None,
-) -> Path:
-    """Resolve path against workspace (if relative) and enforce directory restriction."""
-    p = Path(path).expanduser()
-    if not p.is_absolute() and workspace:
-        p = workspace / p
-    resolved = p.resolve()
-    if allowed_dir:
-        media_path = get_media_dir().resolve()
-        all_dirs = [allowed_dir] + [media_path] + (extra_allowed_dirs or [])
-        if not any(_is_under(resolved, d) for d in all_dirs):
-            raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
-    return resolved
-
-
-def _is_under(path: Path, directory: Path) -> bool:
-    try:
-        path.relative_to(directory.resolve())
-        return True
-    except ValueError:
-        return False
-
-
-class _FsTool(Tool):
-    """Shared base for filesystem tools — common init and path resolution."""
-
-    def __init__(
-        self,
-        workspace: Path | None = None,
-        allowed_dir: Path | None = None,
-        extra_allowed_dirs: list[Path] | None = None,
-    ):
-        self._workspace = workspace
-        self._allowed_dir = allowed_dir
-        self._extra_allowed_dirs = extra_allowed_dirs
-
-    def _resolve(self, path: str) -> Path:
-        return _resolve_path(path, self._workspace, self._allowed_dir, self._extra_allowed_dirs)
+__all__ = [
+    "ReadFileTool",
+    "WriteFileTool",
+    "EditFileTool",
+    "ListDirTool",
+    # Re-exported for backward-compatible imports / monkeypatching.
+    "_resolve_path",
+    "_is_under",
+    "_FsTool",
+    "_BLOCKED_DEVICE_PATHS",
+    "_is_blocked_device",
+    "get_media_dir",
+]
 
 
 # ---------------------------------------------------------------------------
 # read_file
 # ---------------------------------------------------------------------------
-
-
-_BLOCKED_DEVICE_PATHS = frozenset({
-    "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full",
-    "/dev/stdin", "/dev/stdout", "/dev/stderr",
-    "/dev/tty", "/dev/console",
-    "/dev/fd/0", "/dev/fd/1", "/dev/fd/2",
-})
-
-
-def _is_blocked_device(path: str | Path) -> bool:
-    """Check if path is a blocked device that could hang or produce infinite output."""
-    import re
-    raw = str(path)
-
-    # Resolve symlinks to check the actual target
-    try:
-        resolved = str(Path(raw).resolve())
-    except (OSError, ValueError):
-        resolved = raw
-
-    if raw in _BLOCKED_DEVICE_PATHS or resolved in _BLOCKED_DEVICE_PATHS:
-        return True
-    if re.match(r"/proc/\d+/fd/[012]$", raw) or re.match(r"/proc/self/fd/[012]$", raw):
-        return True
-    if re.match(r"/proc/\d+/fd/[012]$", resolved) or re.match(r"/proc/self/fd/[012]$", resolved):
-        return True
-
-    # Check if resolved path starts with /dev/ (covers symlinks to devices)
-    if resolved.startswith("/dev/"):
-        return True
-    return False
 
 
 def _parse_page_range(pages: str, total: int) -> tuple[int, int]:

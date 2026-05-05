@@ -308,34 +308,18 @@ class SubagentManager:
             if result.stop_reason == "tool_error":
                 status.tool_events = list(result.tool_events)
                 output = self._format_partial_progress(result)
-                self.task_store.append_output(task_id, output)
-                self.task_store.finish_task(
-                    task_id,
-                    status="failed",
-                    stop_reason=result.stop_reason,
-                    error=result.error,
-                )
-                await self._announce_result(
-                    task_id, label, task,
-                    output,
-                    origin, "error",
-                )
+                failed = True
             elif result.stop_reason == "error":
                 output = result.error or "Error: subagent execution failed."
-                self.task_store.append_output(task_id, output)
-                self.task_store.finish_task(
-                    task_id,
-                    status="failed",
-                    stop_reason=result.stop_reason,
-                    error=result.error,
-                )
-                await self._announce_result(
-                    task_id, label, task,
-                    output,
-                    origin, "error",
-                )
+                failed = True
             elif result.error:
                 output = result.error
+                failed = True
+            else:
+                output = result.final_content or "Task completed but no final response was generated."
+                failed = False
+
+            if failed:
                 self.task_store.append_output(task_id, output)
                 self.task_store.finish_task(
                     task_id,
@@ -343,22 +327,17 @@ class SubagentManager:
                     stop_reason=result.stop_reason,
                     error=result.error,
                 )
-                await self._announce_result(
-                    task_id, label, task,
-                    output,
-                    origin, "error",
-                )
+                await self._announce_result(task_id, label, task, output, origin, "error")
             else:
-                final_result = result.final_content or "Task completed but no final response was generated."
                 logger.info("Subagent [{}] completed successfully", task_id)
-                self.task_store.append_output(task_id, final_result)
+                self.task_store.append_output(task_id, output)
                 self.task_store.finish_task(
                     task_id,
                     status="completed",
                     stop_reason=result.stop_reason,
                     error=result.error,
                 )
-                await self._announce_result(task_id, label, task, final_result, origin, "ok")
+                await self._announce_result(task_id, label, task, output, origin, "ok")
 
         except Exception as e:
             status.phase = "error"

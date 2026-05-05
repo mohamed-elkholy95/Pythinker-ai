@@ -270,7 +270,7 @@ def build_layout(
     completions_float = Float(
         xcursor=True,
         ycursor=True,
-        content=CompletionsMenu(max_height=8, scroll_offset=1),
+        content=CompletionsMenu(max_height=12, scroll_offset=1),
     )
 
     floats = [

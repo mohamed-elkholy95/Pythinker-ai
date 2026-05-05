@@ -64,6 +64,16 @@ _DEFAULT_PT = Style.from_dict({
     # ' ' on the bg color, giving a subtle vertical strip).
     "scrollbar.background": "bg:#1a1f29",
     "scrollbar.button": "bg:#C0C0C0",
+    # Slash-command autocomplete popup. prompt_toolkit's CompletionsMenu
+    # paints with these classes; without them it falls back to its built-in
+    # gray-on-gray defaults that read as washed-out next to the rest of the
+    # TUI. Mirrors the picker palette so selection + meta colors match.
+    "completion-menu": "bg:#11151B #D9D4C7",
+    "completion-menu.completion": "bg:#11151B #C8B8FF",
+    "completion-menu.completion.current": "bg:#263241 #F7D08A bold",
+    "completion-menu.meta.completion": "bg:#11151B #7B7F87",
+    "completion-menu.meta.completion.current": "bg:#263241 #D9D4C7",
+    "completion-menu.multi-column-meta": "bg:#11151B #7B7F87",
 })
 
 _DEFAULT_RICH = Theme({
@@ -110,6 +120,12 @@ _MONO_PT = Style.from_dict({
     "notice.error": "#ffffff bold reverse",
     "scrollbar.background": "bg:#222222",
     "scrollbar.button": "bg:#ffffff",
+    "completion-menu": "bg:#000000 #ffffff",
+    "completion-menu.completion": "bg:#000000 #ffffff",
+    "completion-menu.completion.current": "bg:#ffffff #000000 bold",
+    "completion-menu.meta.completion": "bg:#000000 #888888",
+    "completion-menu.meta.completion.current": "bg:#ffffff #000000",
+    "completion-menu.multi-column-meta": "bg:#000000 #888888",
 })
 
 _MONO_RICH = Theme({

@@ -40,6 +40,9 @@ class _PlaceholderProcessor(Processor):
         )
 
 
+_NAME_COL_WIDTH = 22
+
+
 class SlashCompleter(Completer):
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
@@ -53,6 +56,10 @@ class SlashCompleter(Completer):
         # don't get their own row — they appear in the suggestion's
         # display_meta so the user knows "/quit" is a synonym for "/exit"
         # without /q showing two near-identical lines.
+        #
+        # display is padded to a fixed width so prompt_toolkit's
+        # CompletionsMenu lays the description column out flush across all
+        # rows instead of right-aligning each meta against its own name.
         for cmd in SLASH_COMMANDS:
             names = (cmd.name, *cmd.aliases)
             if not any(n.startswith(prefix) for n in names):
@@ -63,7 +70,7 @@ class SlashCompleter(Completer):
             yield Completion(
                 cmd.name,
                 start_position=-len(prefix),
-                display=f"/{cmd.name}",
+                display=f"/{cmd.name}".ljust(_NAME_COL_WIDTH),
                 display_meta=meta,
             )
 

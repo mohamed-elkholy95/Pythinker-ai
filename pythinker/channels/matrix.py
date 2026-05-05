@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import logging
 import mimetypes
 import time
 from dataclasses import dataclass
@@ -47,6 +46,7 @@ from pythinker.channels.base import BaseChannel
 from pythinker.config.paths import get_data_dir, get_media_dir
 from pythinker.config.schema import Base
 from pythinker.utils.helpers import safe_filename
+from pythinker.utils.nio_logging import configure_nio_logging_bridge
 
 TYPING_NOTICE_TIMEOUT_MS = 30_000
 # Must stay below TYPING_NOTICE_TIMEOUT_MS so the indicator doesn't expire mid-processing.
@@ -192,28 +192,6 @@ def _build_matrix_text_content(
     return content
 
 
-class _NioLoguruHandler(logging.Handler):
-    """Route matrix-nio stdlib logs into Loguru."""
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            level = logger.level(record.levelname).name
-        except ValueError:
-            level = record.levelno
-        frame, depth = logging.currentframe(), 2
-        while frame and frame.f_code.co_filename == logging.__file__:
-            frame, depth = frame.f_back, depth + 1
-        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
-
-
-def _configure_nio_logging_bridge() -> None:
-    """Bridge matrix-nio logs to Loguru (idempotent)."""
-    nio_logger = logging.getLogger("nio")
-    if not any(isinstance(h, _NioLoguruHandler) for h in nio_logger.handlers):
-        nio_logger.handlers = [_NioLoguruHandler()]
-        nio_logger.propagate = False
-
-
 class MatrixConfig(Base):
     """Matrix (Element) channel configuration."""
 
@@ -271,7 +249,7 @@ class MatrixChannel(BaseChannel):
     async def start(self) -> None:
         """Start Matrix client and begin sync loop."""
         self._running = True
-        _configure_nio_logging_bridge()
+        configure_nio_logging_bridge()
 
         self.store_path = get_data_dir() / "matrix-store"
         self.store_path.mkdir(parents=True, exist_ok=True)

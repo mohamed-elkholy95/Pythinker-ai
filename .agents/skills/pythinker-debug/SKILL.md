@@ -134,8 +134,10 @@ pythinker status          # runtime health, channel state, provider config
 - Skip binaries, files >2 MB, output >128 000 chars
 
 ### Memory / Dream Issues
-**File:** `pythinker/agent/memory.py` (~959 LOC; `MemoryStore`,
-`Consolidator`, and the scheduled `Dream` class all live here)
+**Files:** `pythinker/agent/memory/store.py` (`MemoryStore`),
+`pythinker/agent/memory/consolidator.py` (`Consolidator`),
+`pythinker/agent/memory/dream.py` (`Dream`); package re-exports via
+`pythinker/agent/memory/__init__.py`
 
 - `dulwich` is pure-Python git — memory paths must not shell out to
   system `git`; the wheel works on hosts without git installed
@@ -145,12 +147,16 @@ pythinker status          # runtime health, channel state, provider config
 - **Renaming either checkpoint key breaks crash recovery for live sessions.**
   Use a metadata migration if you must rename
 - `Consolidator`: `_MAX_CONSOLIDATION_ROUNDS=5`, `_MAX_CHUNK_MESSAGES=60`
-  (`pythinker/agent/memory.py:402-403`)
+  (`pythinker/agent/memory/consolidator.py:27-28`)
 - Dream tool subset: `read_file`, `edit_file`, `write_file` only —
   no `spawn`, no `message`
 - Stale-line annotation: `_STALE_THRESHOLD_DAYS=14`
-  (`pythinker/agent/memory.py:659`) appends `← Nd` after lines older
+  (`pythinker/agent/memory/dream.py:25`) appends `← Nd` after lines older
   than 14 d
+- `estimate_message_tokens` is re-exported from `pythinker.agent.memory`
+  as the authoritative monkeypatch target — `Consolidator` resolves it
+  through the package at call time so test overrides on the package
+  attribute are observed
 
 ### Subagent Recursion
 **Files:** `pythinker/agent/subagent.py`,

@@ -224,4 +224,37 @@ def _prompt_cache_key(messages: list[dict[str, Any]]) -> str:
 def _friendly_error(status_code: int, raw: str) -> str:
     if status_code == 429:
         return "ChatGPT usage quota exceeded or rate limit triggered. Please try again later."
+    if status_code == 402:
+        code = _extract_error_code(raw)
+        if code == "deactivated_workspace":
+            return (
+                "Your ChatGPT workspace is deactivated, so Codex rejected the request. "
+                "Please reconnect or re-auth with Codex: run "
+                "`pythinker provider login openai-codex` and sign in with a ChatGPT "
+                "account that has an active Plus/Pro/Business subscription."
+            )
+        return (
+            "ChatGPT billing rejected the request (HTTP 402). Please check your "
+            "ChatGPT subscription, then re-auth with "
+            "`pythinker provider login openai-codex`."
+        )
+    if status_code in (401, 403):
+        return (
+            f"ChatGPT rejected the Codex credentials (HTTP {status_code}). "
+            "Your token is likely expired or revoked — please re-auth with "
+            "`pythinker provider login openai-codex`."
+        )
     return f"HTTP {status_code}: {raw}"
+
+
+def _extract_error_code(raw: str) -> str | None:
+    try:
+        payload = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    if isinstance(detail, dict):
+        code = detail.get("code")
+        if isinstance(code, str):
+            return code
+    return None

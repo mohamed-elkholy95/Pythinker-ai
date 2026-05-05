@@ -149,18 +149,40 @@ async def open_provider_picker(app: "TuiApp") -> None:
         new_id = getattr(spec, "name", None)
         if not new_id:
             return
-        # Pre-flight: refuse the switch if the provider isn't ready, and
-        # tell the user exactly what to do.
+        # If the provider isn't ready, run auth inline (OAuth flow for
+        # Codex / Copilot, masked api-key prompt for everyone else) and
+        # only proceed to the switch if it succeeds. Mirrors `/login`'s
+        # behaviour — same code path lives in tui.auth_actions.
         state, hint = _provider_status(spec, app.config)
         if state == "needs-setup":
-            app.chat_pane.append_notice(
-                f"{spec.display_name or new_id} is not configured. {hint}. "
-                f"Then re-open `/provider`.",
-                kind="warn",
-            )
+            from pythinker.cli.tui.auth_actions import authenticate_provider
+
             app.overlay.pop()
             app.application.invalidate()
-            return
+            ok, detail = await authenticate_provider(app, spec)
+            if not ok:
+                app.chat_pane.append_notice(
+                    f"{spec.display_name or new_id} authentication failed: "
+                    f"{detail}. {hint}",
+                    kind="warn" if detail == "cancelled" else "error",
+                )
+                return
+            # Re-check status now that creds are in place; refuse the
+            # switch if the factory still rejects (e.g. wrong key shape).
+            state, hint = _provider_status(spec, app.config)
+            if state == "needs-setup":
+                app.chat_pane.append_notice(
+                    f"{spec.display_name or new_id} still not ready after "
+                    f"auth: {hint}",
+                    kind="warn",
+                )
+                return
+            app.chat_pane.append_notice(
+                f"✓ Authenticated with {spec.display_name or new_id} "
+                f"({detail}).",
+                kind="info",
+            )
+            # Fall through to the switch below.
         try:
             # Use the canonical AgentLoop._apply_provider_snapshot path so the
             # new provider cascades into the runner, subagents, consolidator,

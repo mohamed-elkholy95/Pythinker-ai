@@ -221,209 +221,32 @@ async def _run_router_command(app: "TuiApp", handler, args: list[str]) -> None:
         app.chat_pane.append_notice(text, kind=kind)
 
 
-async def _run_oauth_login_in_terminal(spec) -> tuple[bool, str]:
-    """Drive the OAuth/device-code flow for ``spec`` inside the live TUI.
-
-    ``run_in_terminal`` lets prompt_toolkit yield the screen back to plain
-    stdio while ``login_oauth_interactive`` (Codex) or ``login_github_copilot``
-    (device flow) print URLs and read pasted codes. ``oauth_cli_kit`` already
-    detects a running event loop and threads its own ``asyncio.run`` so we
-    don't have to hand-roll that.
-
-    Returns ``(ok, detail)`` — ``detail`` is the account_id on success or the
-    exception message on failure.
-    """
-    from prompt_toolkit.application import run_in_terminal
-
-    from pythinker.auth.oauth_remote import run_oauth_with_hint
-
-    def _do() -> tuple[bool, str]:
-        if spec.name == "openai_codex":
-            try:
-                from oauth_cli_kit.flow import login_oauth_interactive
-            except Exception as exc:  # noqa: BLE001
-                return False, f"oauth_cli_kit unavailable: {exc}"
-            login_fn = login_oauth_interactive
-        elif spec.name == "github_copilot":
-            try:
-                from pythinker.providers.github_copilot_provider import (
-                    login_github_copilot,
-                )
-            except Exception as exc:  # noqa: BLE001
-                return False, f"copilot login unavailable: {exc}"
-            login_fn = login_github_copilot
-        else:
-            return False, f"OAuth not implemented for {spec.name}"
-        print()
-        try:
-            token = run_oauth_with_hint(
-                login_fn,
-                print_fn=print,
-                prompt_fn=input,
-            )
-        except (KeyboardInterrupt, EOFError):
-            return False, "cancelled"
-        except Exception as exc:  # noqa: BLE001
-            return False, str(exc)
-        if not token or not getattr(token, "access", None):
-            return False, "no token returned"
-        return True, getattr(token, "account_id", None) or "(no account_id)"
-
-    return await run_in_terminal(_do)
-
-
-async def _prompt_api_key(label: str, env_key: str, signup_url: str) -> str:
-    """Pause the TUI and read a masked API key from the terminal.
-
-    Uses ``run_in_terminal`` so prompt_toolkit yields the screen to plain
-    stdio while ``getpass`` echoes nothing back. Returns the raw key (already
-    stripped) or ``""`` if the user cancelled with Ctrl-C / Ctrl-D.
-    """
-    from getpass import getpass
-
-    from prompt_toolkit.application import run_in_terminal
-
-    def _ask() -> str:
-        print()
-        print(f"Enter API key for {label} (input hidden):")
-        if signup_url:
-            print(f"  Get one at: {signup_url}")
-        try:
-            return getpass(f"  {env_key} > ")
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return ""
-
-    raw = await run_in_terminal(_ask)
-    return (raw or "").strip()
-
-
-async def _save_api_key_and_reload(app: "TuiApp", spec, key: str) -> str | None:
-    """Persist ``key`` under ``providers.<name>.api_key`` and hot-reload.
-
-    Mirrors the model-self-heal path in ``app.py``: copy the live config,
-    mutate, build a new provider snapshot, swap it into the agent loop, then
-    persist to disk. Returns ``None`` on success or an error string on
-    failure (caller surfaces it as a warning notice).
-    """
-    from loguru import logger
-
-    from pythinker.config.loader import get_config_path, save_config
-    from pythinker.providers.factory import build_provider_snapshot
-
-    try:
-        new_config = app.config.model_copy(deep=True)
-    except Exception as exc:  # noqa: BLE001
-        return f"could not clone config: {exc}"
-    provider_cfg = getattr(new_config.providers, spec.name, None)
-    if provider_cfg is None:
-        return f"no config block for {spec.label}"
-    try:
-        provider_cfg.api_key = key
-    except Exception as exc:  # noqa: BLE001
-        return f"could not set api_key: {exc}"
-    try:
-        snapshot = build_provider_snapshot(new_config)
-        app.agent_loop._apply_provider_snapshot(snapshot)  # noqa: SLF001
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("api-key reload: snapshot apply failed")
-        return f"reload failed: {exc}"
-    app.config = new_config
-    try:
-        save_config(new_config, get_config_path())
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("api-key save: persist failed: {}", exc)
-        return f"saved in-memory but could not persist to disk: {exc}"
-    return None
-
-
 async def _cmd_login(app: "TuiApp", args: list[str]) -> None:
-    """``/login [provider]`` — OAuth status or interactive api-key prompt.
+    """``/login`` — open the provider picker; auth happens on-select.
 
-    Routing by provider type:
-      • OAuth providers → defer to the router handler (status + the
-        ``pythinker provider login <name>`` terminal command, since the
-        browser/device-code flow can't run inside the TUI).
-      • Local / direct providers → config-edit hint (no api_key field).
-      • API-key providers (incl. gateways) → masked terminal prompt, then
-        hot-reload the live provider and persist to ``~/.pythinker/config.json``.
-      • No arg or unknown provider → defer to the router handler so its
-        error / summary phrasing stays in lockstep.
+    The picker now owns the auth UX: rows show provider name + auth-state
+    badge, and selecting a row that's not yet ``ready`` runs the OAuth flow
+    (Codex / Copilot) or prompts for an API key (everyone else) before
+    switching the active provider. Direct ``/login <name>`` is intentionally
+    not supported — pick from the menu so the same review-before-switch
+    affordance applies.
     """
-    from pythinker.command.builtins.auth import cmd_login as _login
-    from pythinker.providers.registry import find_by_name
+    del args  # picker is the single entry point — args ignored.
+    from pythinker.cli.tui.pickers.provider import open_provider_picker
 
-    arg = args[0].strip() if args else ""
-    if not arg:
-        await _run_router_command(app, _login, args)
-        return
-
-    spec = find_by_name(arg.replace("-", "_"))
-    if spec is None:
-        await _run_router_command(app, _login, args)
-        return
-
-    if getattr(spec, "is_oauth", False):
-        ok, detail = await _run_oauth_login_in_terminal(spec)
-        if ok:
-            # OAuth providers re-read their token from FileTokenStorage on
-            # each request, but rebuild the snapshot anyway so any cached
-            # client state (httpx pools, etc.) is dropped atomically.
-            try:
-                from pythinker.providers.factory import build_provider_snapshot
-                snapshot = build_provider_snapshot(app.config)
-                app.agent_loop._apply_provider_snapshot(snapshot)  # noqa: SLF001
-            except Exception:  # noqa: BLE001
-                pass
-            app.chat_pane.append_notice(
-                f"✓ Authenticated with {spec.label} ({detail}).",
-                kind="info",
-            )
-            app.status_bar.refresh()
-        else:
-            app.chat_pane.append_notice(
-                f"{spec.label} authentication failed: {detail}",
-                kind="warn" if detail == "cancelled" else "error",
-            )
-        return
-
-    if getattr(spec, "is_local", False) or getattr(spec, "is_direct", False):
-        kind_word = "api_base" if spec.is_local else "configuration"
-        app.chat_pane.append_notice(
-            f"{spec.label} is configured via {kind_word}. Edit "
-            f"providers.{spec.name} in your config "
-            f"(~/.pythinker/config.json).",
-            kind="info",
-        )
-        return
-
-    key = await _prompt_api_key(spec.label, spec.env_key, spec.signup_url)
-    if not key:
-        app.chat_pane.append_notice(
-            f"{spec.label} login cancelled.", kind="warn"
-        )
-        return
-    err = await _save_api_key_and_reload(app, spec, key)
-    if err:
-        app.chat_pane.append_notice(
-            f"Could not save {spec.label} API key: {err}", kind="error"
-        )
-        return
-    app.chat_pane.append_notice(
-        f"✓ {spec.label} API key saved. The next message will use it.",
-        kind="info",
-    )
-    app.status_bar.refresh()
+    await open_provider_picker(app)
 
 
 async def _cmd_logout(app: "TuiApp", args: list[str]) -> None:
-    """``/logout <provider>`` — delete OAuth token, or clear an api_key.
+    """``/logout [provider]`` — clear stored credentials.
 
-    OAuth providers go through the router handler (token-file unlink). For
-    api-key providers, the field is cleared in config and the provider is
-    hot-reloaded so the next turn fails fast with a clear "no api_key" error
-    instead of using a stale key.
+    Without a provider name, defers to the router handler (lists providers
+    + prints usage). With a name: OAuth providers get their token file
+    unlinked; api-key providers have ``providers.<name>.api_key`` cleared
+    and the live provider is hot-reloaded so a stale key can't sneak into
+    the next turn.
     """
+    from pythinker.cli.tui.auth_actions import save_api_key_and_reload
     from pythinker.command.builtins.auth import cmd_logout as _logout
     from pythinker.providers.registry import find_by_name
 
@@ -443,7 +266,7 @@ async def _cmd_logout(app: "TuiApp", args: list[str]) -> None:
         )
         return
 
-    err = await _save_api_key_and_reload(app, spec, "")
+    err = await save_api_key_and_reload(app, spec, "")
     if err:
         app.chat_pane.append_notice(
             f"Could not clear {spec.label} API key: {err}", kind="error"
@@ -525,8 +348,7 @@ async def dispatch(app: "TuiApp", line: str) -> bool:
     if cmd is None:
         verb = line.split()[0] if line.split() else line
         app.chat_pane.append_notice(
-            f"command not available in TUI; run `pythinker {verb.lstrip('/')} "
-            "--help` from your shell",
+            f"unknown command: {verb}. Type /help for the command list.",
             kind="warn",
         )
         return True

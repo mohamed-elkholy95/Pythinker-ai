@@ -1,5 +1,6 @@
 # Project-specific
 .worktrees/
+.claude/
 .assets
 .docs
 .env
@@ -7,6 +8,7 @@
 .orion
 .omx
 blackbox/
+docs/superpowers/
 
 # webui (monorepo frontend)
 webui/node_modules/

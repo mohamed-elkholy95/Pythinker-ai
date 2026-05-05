@@ -1,14 +1,24 @@
-"""WebSocket server channel: pythinker acts as a WebSocket server and serves connected clients."""
+"""The :class:`WebSocketChannel` itself: lifecycle, bus wiring, request dispatch.
+
+Stateless helpers live in sibling modules (:mod:`auth`, :mod:`config`,
+:mod:`media`, :mod:`multiplex`, :mod:`rest`); the per-connection state
+machine, REST handlers, and multiplex envelope dispatch keep their tight
+coupling to ``self`` here.
+
+Test patch targets like ``pythinker.channels.websocket.get_media_dir``
+land on the package's ``__init__`` module, so the few call sites that
+need the patched binding look the helper up dynamically through the
+package namespace via :func:`_get_media_dir` instead of importing it
+directly at module level.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import base64
 import binascii
-import email.utils
 import hashlib
 import hmac
-import http
 import json
 import mimetypes
 import re
@@ -18,13 +28,10 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self
-from urllib.parse import parse_qs, unquote, urlparse
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
-from pydantic import Field, field_validator, model_validator
 from websockets.asyncio.server import ServerConnection, serve
-from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
@@ -32,368 +39,65 @@ from websockets.http11 import Response
 from pythinker.bus.events import OutboundMessage
 from pythinker.bus.queue import MessageBus
 from pythinker.channels.base import BaseChannel
-from pythinker.config.paths import get_media_dir
-from pythinker.config.schema import AgentDefaults, Base
+from pythinker.channels.websocket.auth import (
+    _b64url_decode,
+    _b64url_encode,
+    _bearer_token,
+    _is_local_bind,
+    _is_localhost,
+    _is_websocket_upgrade,
+    _issue_route_secret_matches,
+)
+from pythinker.channels.websocket.config import (
+    WebSocketConfig,
+    _normalize_config_path,
+)
+from pythinker.channels.websocket.media import (
+    _IMAGE_MIME_ALLOWED,
+    _MAX_IMAGE_BYTES,
+    _MAX_IMAGES_PER_MESSAGE,
+    _MEDIA_ALLOWED_MIMES,
+    _extract_data_url_mime,
+)
+from pythinker.channels.websocket.multiplex import (
+    _is_valid_chat_id,
+    _parse_envelope,
+    _parse_inbound_payload,
+)
+from pythinker.channels.websocket.rest import (
+    _decode_api_key,
+    _http_error,
+    _http_json_response,
+    _http_response,
+    _parse_query,
+    _parse_request_path,
+    _query_first,
+    _read_webui_model_name,
+    _safe_int,
+)
+from pythinker.config.schema import AgentDefaults
 from pythinker.utils.media_decode import (
     FileSizeExceeded,
     save_base64_data_url,
 )
-
-CONFIG_FIELDS = {
-    "label": "WebSocket",
-    "required_secrets": ["channels.websocket.token", "channels.websocket.token_issue_secret"],
-    "fields": ["enabled", "host", "port", "path", "token", "allow_from", "streaming"],
-    "local_dependency_checks": [],
-}
 
 if TYPE_CHECKING:
     from pythinker.admin.service import AdminService
     from pythinker.session.manager import SessionManager
 
 
-def _strip_trailing_slash(path: str) -> str:
-    if len(path) > 1 and path.endswith("/"):
-        return path.rstrip("/")
-    return path or "/"
+def _get_media_dir(*args: Any, **kwargs: Any) -> Path:
+    """Defer ``get_media_dir`` lookup so tests can patch the package binding.
 
-
-def _normalize_config_path(path: str) -> str:
-    return _strip_trailing_slash(path)
-
-
-class WebSocketConfig(Base):
-    """WebSocket server channel configuration.
-
-    Clients connect with URLs like ``ws://{host}:{port}{path}?client_id=...&token=...``.
-    - ``client_id``: Used for ``allow_from`` authorization; if omitted, a value is generated and logged.
-    - ``token``: If non-empty, the ``token`` query param may match this static secret; short-lived tokens
-      from ``token_issue_path`` are also accepted.
-    - ``token_issue_path``: If non-empty, **GET** (HTTP/1.1) to this path returns JSON
-      ``{"token": "...", "expires_in": <seconds>}``; use ``?token=...`` when opening the WebSocket.
-      Must differ from ``path`` (the WS upgrade path). If the client runs in the **same process** as
-      pythinker and shares the asyncio loop, use a thread or async HTTP client for GET—do not call
-      blocking ``urllib`` or synchronous ``httpx`` from inside a coroutine.
-    - ``token_issue_secret``: If non-empty, token requests must send ``Authorization: Bearer <secret>`` or
-      ``X-Pythinker-Auth: <secret>``.
-    - ``websocket_requires_token``: If True, the handshake must include a valid token (static or issued and not expired).
-    - Each connection has its own session: a unique ``chat_id`` maps to the agent session internally.
-    - ``media`` field in outbound messages contains local filesystem paths; remote clients need a
-      shared filesystem or an HTTP file server to access these files.
+    Existing tests do ``patch("pythinker.channels.websocket.get_media_dir", ...)``;
+    that patch lands on the package ``__init__``'s re-exported binding.  By
+    pulling the symbol off ``pythinker.channels.websocket`` at call time we
+    pick up the patched value while the eager re-export keeps the public
+    import path stable.
     """
+    from pythinker.channels import websocket as _ws_pkg
 
-    enabled: bool = True
-    host: str = "127.0.0.1"
-    port: int = 8765
-    path: str = "/"
-    token: str = ""
-    token_issue_path: str = ""
-    token_issue_secret: str = ""
-    token_ttl_s: int = Field(default=300, ge=30, le=86_400)
-    websocket_requires_token: bool = True
-    allow_from: list[str] = Field(default_factory=lambda: ["*"])
-    streaming: bool = True
-    # Refuse to start on non-loopback hosts without TLS unless this flag is
-    # explicitly true. Plaintext tokens over a network interface are a clear
-    # vulnerability; flip this only for trusted LAN dev with eyes open.
-    allow_insecure_remote: bool = False
-    # When non-empty, the WebSocket handshake's ``Origin`` header must match
-    # one of these exact values.  Use to defend against browser-based
-    # cross-site WebSocket abuse when the channel is exposed via a reverse
-    # proxy / public URL.  Empty list = no origin check.
-    allowed_origins: list[str] = Field(default_factory=list)
-    # Default 36 MB, upper 40 MB: supports up to 4 images at ~6 MB each after
-    # client-side Worker normalization (see webui Composer). 4 × 6 MB × 1.37
-    # (base64 overhead) + envelope framing stays under 36 MB; the 40 MB ceiling
-    # leaves a small margin for sender slop without opening a DoS avenue.
-    max_message_bytes: int = Field(default=37_748_736, ge=1024, le=41_943_040)
-    ping_interval_s: float = Field(default=20.0, ge=5.0, le=300.0)
-    ping_timeout_s: float = Field(default=20.0, ge=5.0, le=300.0)
-    ssl_certfile: str = ""
-    ssl_keyfile: str = ""
-
-    @field_validator("path")
-    @classmethod
-    def path_must_start_with_slash(cls, value: str) -> str:
-        if not value.startswith("/"):
-            raise ValueError('path must start with "/"')
-        return _normalize_config_path(value)
-
-    @field_validator("token_issue_path")
-    @classmethod
-    def token_issue_path_format(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            return ""
-        if not value.startswith("/"):
-            raise ValueError('token_issue_path must start with "/"')
-        return _normalize_config_path(value)
-
-    @model_validator(mode="after")
-    def token_issue_path_differs_from_ws_path(self) -> Self:
-        if not self.token_issue_path:
-            return self
-        if _normalize_config_path(self.token_issue_path) == _normalize_config_path(self.path):
-            raise ValueError("token_issue_path must differ from path (the WebSocket upgrade path)")
-        return self
-
-
-def _http_json_response(data: dict[str, Any], *, status: int = 200) -> Response:
-    body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-    headers = Headers(
-        [
-            ("Date", email.utils.formatdate(usegmt=True)),
-            ("Connection", "close"),
-            ("Content-Length", str(len(body))),
-            ("Content-Type", "application/json; charset=utf-8"),
-        ]
-    )
-    reason = http.HTTPStatus(status).phrase
-    return Response(status, reason, headers, body)
-
-
-def _read_webui_model_name() -> str | None:
-    """Return the configured default model for readonly webui display."""
-    try:
-        from pythinker.config.loader import load_config
-
-        model = load_config().agents.defaults.model.strip()
-        return model or None
-    except Exception as e:
-        logger.debug("webui bootstrap could not load model name: {}", e)
-        return None
-
-
-def _parse_request_path(path_with_query: str) -> tuple[str, dict[str, list[str]]]:
-    """Parse normalized path and query parameters in one pass."""
-    parsed = urlparse("ws://x" + path_with_query)
-    path = _strip_trailing_slash(parsed.path or "/")
-    return path, parse_qs(parsed.query)
-
-
-def _normalize_http_path(path_with_query: str) -> str:
-    """Return the path component (no query string), with trailing slash normalized (root stays ``/``)."""
-    return _parse_request_path(path_with_query)[0]
-
-
-def _parse_query(path_with_query: str) -> dict[str, list[str]]:
-    return _parse_request_path(path_with_query)[1]
-
-
-def _query_first(query: dict[str, list[str]], key: str) -> str | None:
-    """Return the first value for *key*, or None."""
-    values = query.get(key)
-    return values[0] if values else None
-
-
-def _safe_int(
-    raw: str | None, *, default: int, lo: int | None = None, hi: int | None = None
-) -> int:
-    """Parse a query-string integer with bounds; fall back to *default* on bad input."""
-    if raw is None:
-        return default
-    try:
-        v = int(raw)
-    except (TypeError, ValueError):
-        return default
-    if lo is not None and v < lo:
-        return lo
-    if hi is not None and v > hi:
-        return hi
-    return v
-
-
-def _parse_inbound_payload(raw: str) -> str | None:
-    """Parse a client frame into text; return None for empty or unrecognized content."""
-    text = raw.strip()
-    if not text:
-        return None
-    if text.startswith("{"):
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            return text
-        if isinstance(data, dict):
-            for key in ("content", "text", "message"):
-                value = data.get(key)
-                if isinstance(value, str) and value.strip():
-                    return value
-            return None
-        return None
-    return text
-
-
-# Accept UUIDs and short scoped keys like "unified:default". Keeps the capability
-# namespace small enough to rule out path traversal / quote injection tricks.
-_CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_:-]{1,64}$")
-
-
-def _is_valid_chat_id(value: Any) -> bool:
-    return isinstance(value, str) and _CHAT_ID_RE.match(value) is not None
-
-
-def _parse_envelope(raw: str) -> dict[str, Any] | None:
-    """Return a typed envelope dict if the frame is a new-style JSON envelope, else None.
-
-    A frame qualifies when it parses as a JSON object with a string ``type`` field.
-    Legacy frames (plain text, or ``{"content": ...}`` without ``type``) return None;
-    callers should fall back to :func:`_parse_inbound_payload` for those.
-    """
-    text = raw.strip()
-    if not text.startswith("{"):
-        return None
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(data, dict):
-        return None
-    t = data.get("type")
-    if not isinstance(t, str):
-        return None
-    return data
-
-
-# Per-message image limits. The server-side guard is a touch looser than the
-# client's ``Worker`` normalization target (6 MB) — tolerate client slop, but
-# still cap total ingress at ``_MAX_IMAGES_PER_MESSAGE * _MAX_IMAGE_BYTES``
-# which fits comfortably inside ``max_message_bytes``.
-_MAX_IMAGES_PER_MESSAGE = 4
-_MAX_IMAGE_BYTES = 8 * 1024 * 1024
-
-# Image MIME whitelist — matches the Composer's ``accept`` list. SVG is
-# explicitly excluded to avoid the XSS surface inside embedded scripts.
-_IMAGE_MIME_ALLOWED: frozenset[str] = frozenset({
-    "image/png",
-    "image/jpeg",
-    "image/webp",
-    "image/gif",
-})
-
-_DATA_URL_MIME_RE = re.compile(r"^data:([^;]+);base64,", re.DOTALL)
-
-
-def _extract_data_url_mime(url: str) -> str | None:
-    """Return the MIME type of a ``data:<mime>;base64,...`` URL, else ``None``."""
-    if not isinstance(url, str):
-        return None
-    m = _DATA_URL_MIME_RE.match(url)
-    if not m:
-        return None
-    return m.group(1).strip().lower() or None
-
-
-_LOCALHOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
-
-
-def _is_local_bind(host: str) -> bool:
-    """Return True when *host* refers exclusively to the loopback interface."""
-    return host.strip().lower() in _LOCALHOSTS
-
-# Matches the legacy chat-id pattern but allows file-system-safe stems too,
-# so the API can address sessions whose keys came from non-WebSocket channels.
-_API_KEY_RE = re.compile(r"^[A-Za-z0-9_:.-]{1,128}$")
-
-
-def _decode_api_key(raw_key: str) -> str | None:
-    """Decode a percent-encoded API path segment, then validate the result."""
-    key = unquote(raw_key)
-    if _API_KEY_RE.match(key) is None:
-        return None
-    return key
-
-
-def _is_localhost(connection: Any) -> bool:
-    """Return True if *connection* originated from the loopback interface."""
-    addr = getattr(connection, "remote_address", None)
-    if not addr:
-        return False
-    host = addr[0] if isinstance(addr, tuple) else addr
-    if not isinstance(host, str):
-        return False
-    # ``::ffff:127.0.0.1`` is loopback in IPv6-mapped form.
-    if host.startswith("::ffff:"):
-        host = host[7:]
-    return host in _LOCALHOSTS
-
-
-def _http_response(
-    body: bytes,
-    *,
-    status: int = 200,
-    content_type: str = "text/plain; charset=utf-8",
-    extra_headers: list[tuple[str, str]] | None = None,
-) -> Response:
-    headers = [
-        ("Date", email.utils.formatdate(usegmt=True)),
-        ("Connection", "close"),
-        ("Content-Length", str(len(body))),
-        ("Content-Type", content_type),
-    ]
-    if extra_headers:
-        headers.extend(extra_headers)
-    reason = http.HTTPStatus(status).phrase
-    return Response(status, reason, Headers(headers), body)
-
-
-def _http_error(status: int, message: str | None = None) -> Response:
-    body = (message or http.HTTPStatus(status).phrase).encode("utf-8")
-    return _http_response(body, status=status)
-
-
-def _bearer_token(headers: Any) -> str | None:
-    """Pull a Bearer token out of standard or query-style headers."""
-    auth = headers.get("Authorization") or headers.get("authorization")
-    if auth and auth.lower().startswith("bearer "):
-        return auth[7:].strip() or None
-    return None
-
-
-def _is_websocket_upgrade(request: WsRequest) -> bool:
-    """Detect an actual WS upgrade; plain HTTP GETs to the same path should fall through."""
-    upgrade = request.headers.get("Upgrade") or request.headers.get("upgrade")
-    connection = request.headers.get("Connection") or request.headers.get("connection")
-    if not upgrade or "websocket" not in upgrade.lower():
-        return False
-    if not connection or "upgrade" not in connection.lower():
-        return False
-    return True
-
-
-def _b64url_encode(data: bytes) -> str:
-    """URL-safe base64 without padding — compact + friendly in URL paths."""
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
-
-
-def _b64url_decode(s: str) -> bytes:
-    """Reverse of :func:`_b64url_encode`; caller handles ``ValueError``."""
-    pad = "=" * (-len(s) % 4)
-    return base64.urlsafe_b64decode(s + pad)
-
-
-# Allowed MIME types we actually serve from the media endpoint. Anything
-# outside this set is degraded to ``application/octet-stream`` so an
-# attacker who somehow gets a signed URL for an unexpected file type can't
-# trick the browser into sniffing executable content.
-_MEDIA_ALLOWED_MIMES: frozenset[str] = frozenset({
-    "image/png",
-    "image/jpeg",
-    "image/webp",
-    "image/gif",
-})
-
-
-def _issue_route_secret_matches(headers: Any, configured_secret: str) -> bool:
-    """Return True if the token-issue HTTP request carries credentials matching ``token_issue_secret``."""
-    if not configured_secret:
-        return True
-    authorization = headers.get("Authorization") or headers.get("authorization")
-    if authorization and authorization.lower().startswith("bearer "):
-        supplied = authorization[7:].strip()
-        return hmac.compare_digest(supplied, configured_secret)
-    header_token = headers.get("X-Pythinker-Auth") or headers.get("x-pythinker-auth")
-    if not header_token:
-        return False
-    return hmac.compare_digest(header_token.strip(), configured_secret)
+    return _ws_pkg.get_media_dir(*args, **kwargs)
 
 
 class WebSocketChannel(BaseChannel):
@@ -852,7 +556,7 @@ class WebSocketChannel(BaseChannel):
         client joins it against the existing webui base.
         """
         try:
-            media_root = get_media_dir().resolve()
+            media_root = _get_media_dir().resolve()
             rel = abs_path.resolve().relative_to(media_root)
         except (OSError, ValueError):
             return None
@@ -885,7 +589,7 @@ class WebSocketChannel(BaseChannel):
         # An attacker who somehow bypassed the HMAC check would still need
         # the resolved path to escape the media root; guard defensively.
         try:
-            media_root = get_media_dir().resolve()
+            media_root = _get_media_dir().resolve()
             candidate = (media_root / rel_str).resolve()
             candidate.relative_to(media_root)
         except (OSError, ValueError):
@@ -1438,7 +1142,7 @@ class WebSocketChannel(BaseChannel):
         """
         if len(media) > _MAX_IMAGES_PER_MESSAGE:
             return [], "too_many_images"
-        media_dir = get_media_dir("websocket")
+        media_dir = _get_media_dir("websocket")
         paths: list[str] = []
 
         def _abort(reason: str) -> tuple[list[str], str]:

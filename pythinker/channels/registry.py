@@ -15,13 +15,19 @@ _INTERNAL = frozenset({"base", "manager", "registry"})
 
 
 def discover_channel_names() -> list[str]:
-    """Return all built-in channel module names by scanning the package (zero imports)."""
+    """Return all built-in channel module names by scanning the package (zero imports).
+
+    Channels may be either flat modules (``pythinker/channels/telegram.py``) or
+    packages (``pythinker/channels/websocket/``); the websocket carve-out moved
+    one of the built-ins from the former shape into the latter, so we accept
+    both ``ispkg`` cases here.
+    """
     import pythinker.channels as pkg
 
     return [
         name
-        for _, name, ispkg in pkgutil.iter_modules(pkg.__path__)
-        if name not in _INTERNAL and not ispkg
+        for _, name, _ispkg in pkgutil.iter_modules(pkg.__path__)
+        if name not in _INTERNAL
     ]
 
 

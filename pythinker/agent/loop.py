@@ -13,30 +13,23 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+from pythinker.agent import loop_context, loop_reload, loop_tools
 from pythinker.agent.autocompact import AutoCompact
 from pythinker.agent.context import ContextBuilder
 from pythinker.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from pythinker.agent.memory import Consolidator, Dream
 from pythinker.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
-from pythinker.agent.skills import BUILTIN_SKILLS_DIR
 from pythinker.agent.subagent import SubagentManager
 from pythinker.agent.task_store import TaskStore
-from pythinker.agent.tools.cron import CronTool
-from pythinker.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from pythinker.agent.tools.message import MessageTool
-from pythinker.agent.tools.notebook import NotebookEditTool
-from pythinker.agent.tools.pdf import MakePdfTool
 from pythinker.agent.tools.registry import ToolRegistry
-from pythinker.agent.tools.search import GlobTool, GrepTool
 from pythinker.agent.tools.self import MyTool
-from pythinker.agent.tools.shell import ExecTool
-from pythinker.agent.tools.spawn import SpawnTool
-from pythinker.agent.tools.web import WebFetchTool, WebSearchTool
 from pythinker.bus.events import InboundMessage, OutboundMessage
 from pythinker.bus.queue import MessageBus
 from pythinker.command import CommandContext, CommandRouter, register_builtin_commands
 from pythinker.config.schema import AgentDefaults
 from pythinker.providers.base import LLMProvider
+from pythinker.providers.limits import _clamp_context_window
 from pythinker.runtime.egress import ToolEgressGateway
 from pythinker.runtime.policy import PolicyService
 from pythinker.session.manager import Session, SessionManager
@@ -174,31 +167,6 @@ class _LoopHook(AgentHook):
 
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
         return self._loop._strip_think(content)
-
-
-def _clamp_context_window(
-    provider: LLMProvider, model: str, configured: int
-) -> int:
-    """Clamp ``configured`` to the provider's published input cap.
-
-    Some plans publish hard limits the server enforces (e.g. ChatGPT/Codex
-    OAuth caps gpt-5.5 input at 272k tokens). Without this, configured
-    windows exceeding the cap drive silent server-side overflow after
-    compaction has already trusted the larger budget.
-    """
-    limits = provider.get_model_limits(model)
-    if not isinstance(limits, dict):
-        return configured
-    input_cap = limits.get("input")
-    if not isinstance(input_cap, int) or input_cap <= 0:
-        return configured
-    if configured > input_cap:
-        logger.info(
-            "Clamping context_window_tokens {} → {} for model {} (provider cap)",
-            configured, input_cap, model,
-        )
-        return input_cap
-    return configured
 
 
 class AgentLoop:
@@ -422,118 +390,19 @@ class AgentLoop:
                     )
 
     def _apply_provider_snapshot(self, snapshot: "ProviderSnapshot") -> None:
-        """Swap model/provider for future turns without disturbing an active one.
-
-        Cascade the new provider into the runner, subagent manager, consolidator,
-        and dream so every component shares one provider object. Same-signature
-        snapshots short-circuit early.
-        """
-        provider = snapshot.provider
-        model = snapshot.model
-        context_window_tokens = _clamp_context_window(
-            provider, model, snapshot.context_window_tokens
-        )
-        if self.provider is provider and self.model == model:
-            return
-        old_model = self.model
-        self.provider = provider
-        self.model = model
-        self.context_window_tokens = context_window_tokens
-        self.runner.provider = provider
-        self.subagents.set_provider(provider, model)
-        self.consolidator.set_provider(provider, model, context_window_tokens)
-        self.dream.set_provider(provider, model)
-        self._provider_signature = snapshot.signature
-        logger.info("Runtime model switched for next turn: {} -> {}", old_model, model)
+        loop_reload.apply_provider_snapshot(self, snapshot)
 
     def _refresh_provider_snapshot(self) -> None:
-        """Pull the latest snapshot and apply it if the signature changed.
-
-        Called at the top of every _process_message so config edits land at
-        the next turn boundary. Errors during load are logged and swallowed
-        — a temporarily-broken config must not crash an in-flight session.
-        """
-        if self._provider_snapshot_loader is None:
-            return
-        try:
-            snapshot = self._provider_snapshot_loader()
-        except Exception:
-            logger.exception("Failed to refresh provider config")
-            return
-        if snapshot.signature == self._provider_signature:
-            return
-        self._apply_provider_snapshot(snapshot)
+        loop_reload.refresh_provider_snapshot(self)
 
     def _register_default_tools(self) -> None:
-        """Register the default set of tools."""
-        allowed_dir = (
-            self.workspace if (self.restrict_to_workspace or self.exec_config.sandbox) else None
-        )
-        extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
-        self.tools.register(
-            ReadFileTool(
-                workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read
-            )
-        )
-        for cls in (WriteFileTool, EditFileTool, ListDirTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
-        for cls in (GlobTool, GrepTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
-        self.tools.register(NotebookEditTool(workspace=self.workspace, allowed_dir=allowed_dir))
-        self.tools.register(MakePdfTool(workspace=self.workspace, allowed_dir=allowed_dir))
-        if self.exec_config.enable:
-            self.tools.register(
-                ExecTool(
-                    working_dir=str(self.workspace),
-                    timeout=self.exec_config.timeout,
-                    restrict_to_workspace=self.restrict_to_workspace,
-                    sandbox=self.exec_config.sandbox,
-                    path_append=self.exec_config.path_append,
-                    allowed_env_keys=self.exec_config.allowed_env_keys,
-                )
-            )
-        if self.web_config.enable:
-            self.tools.register(
-                WebSearchTool(config=self.web_config.search, proxy=self.web_config.proxy)
-            )
-            self.tools.register(WebFetchTool(proxy=self.web_config.proxy))
-            self._register_browser_tool(self.web_config.browser)
-        self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
-        self.tools.register(SpawnTool(manager=self.subagents))
-        if self.cron_service:
-            self.tools.register(
-                CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")
-            )
+        loop_tools.register_default_tools(self)
 
     def _browser_storage_dir(self, config: "BrowserConfig") -> Path:
-        if config.storage_state_dir:
-            return Path(config.storage_state_dir).expanduser()
-        from pythinker.config.paths import get_browser_storage_dir
-
-        return get_browser_storage_dir()
+        return loop_tools.browser_storage_dir(config)
 
     def _register_browser_tool(self, config: "BrowserConfig") -> None:
-        self.tools.unregister("browser")
-        self._browser_manager = None
-        if not self.web_config.enable or not config.enable:
-            return
-
-        import importlib.util
-
-        if importlib.util.find_spec("playwright") is None:
-            logger.warning(
-                "browser tool requested but playwright is not installed; "
-                "reinstall or upgrade pythinker-ai to restore the packaged browser dependency."
-            )
-            return
-
-        from pythinker.agent.browser.manager import BrowserSessionManager
-        from pythinker.agent.tools.browser import BrowserTool
-
-        storage_dir = self._browser_storage_dir(config)
-        storage_dir.mkdir(parents=True, exist_ok=True)
-        self._browser_manager = BrowserSessionManager(config, storage_dir=storage_dir)
-        self.tools.register(BrowserTool(self._browser_manager))
+        loop_tools.register_browser_tool(self, config)
 
     async def _refresh_browser_config(self) -> None:
         if self._browser_config_loader is None:
@@ -749,17 +618,14 @@ class AgentLoop:
         seed: dict[str, str],
         session_key: str,
     ) -> "RequestContext":
-        from pythinker.runtime.context import RequestContext
-
         agent_id, policy_version = self._resolve_agent()
-        ctx = RequestContext.for_inbound(
-            channel=seed["channel"],
-            sender_id=seed["sender_id"],
-            chat_id=seed["chat_id"],
+        return loop_context.normalize_context(
+            seed=seed,
             session_key=session_key,
-            budgets=self._budget_template(),
+            agent_id=agent_id,
+            policy_version=policy_version,
+            budget=self._budget_template(),
         )
-        return ctx.with_agent_id(agent_id, policy_version=policy_version)
 
     def _normalize_context_for_direct(
         self,
@@ -769,23 +635,36 @@ class AgentLoop:
         sender_id: str = "api-client",
         chat_id: str = "default",
     ) -> "RequestContext":
-        return self._normalize_context(
-            seed={"channel": channel, "sender_id": sender_id, "chat_id": chat_id},
+        agent_id, policy_version = self._resolve_agent()
+        return loop_context.normalize_context_for_direct(
             session_key=session_key,
+            agent_id=agent_id,
+            policy_version=policy_version,
+            budget=self._budget_template(),
+            channel=channel,
+            sender_id=sender_id,
+            chat_id=chat_id,
         )
 
     def _normalize_context_for_cron(
         self, *, job_id: str, session_key: str,
     ) -> "RequestContext":
-        return self._normalize_context(
-            seed={"channel": "cron", "sender_id": "system", "chat_id": job_id},
+        agent_id, policy_version = self._resolve_agent()
+        return loop_context.normalize_context_for_cron(
+            job_id=job_id,
             session_key=session_key,
+            agent_id=agent_id,
+            policy_version=policy_version,
+            budget=self._budget_template(),
         )
 
     def _normalize_context_for_heartbeat(self, *, session_key: str) -> "RequestContext":
-        return self._normalize_context(
-            seed={"channel": "heartbeat", "sender_id": "system", "chat_id": "default"},
+        agent_id, policy_version = self._resolve_agent()
+        return loop_context.normalize_context_for_heartbeat(
             session_key=session_key,
+            agent_id=agent_id,
+            policy_version=policy_version,
+            budget=self._budget_template(),
         )
 
     def _attach_context(self, msg: "InboundMessage") -> None:

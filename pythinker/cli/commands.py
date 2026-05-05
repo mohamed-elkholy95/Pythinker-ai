@@ -3,10 +3,8 @@
 import asyncio
 import contextlib
 import os
-import select
 import signal
 import sys
-from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -34,19 +32,63 @@ configure_logging_early()
 
 import typer  # noqa: E402
 from loguru import logger  # noqa: E402
-from prompt_toolkit import PromptSession, print_formatted_text  # noqa: E402
-from prompt_toolkit.application import run_in_terminal  # noqa: E402
-from prompt_toolkit.formatted_text import ANSI, HTML  # noqa: E402
-from prompt_toolkit.history import FileHistory  # noqa: E402
-from prompt_toolkit.patch_stdout import patch_stdout  # noqa: E402
+
+# PromptSession, FileHistory, patch_stdout are kept importable here so
+# tests/cli/test_cli_input.py can monkeypatch them on this module
+# (e.g. `patch("pythinker.cli.commands.PromptSession")`). The actual
+# REPL helpers live in pythinker/cli/repl.py and look these up via
+# the `commands` namespace at call time.
+from prompt_toolkit import PromptSession  # noqa: E402, F401
+from prompt_toolkit.history import FileHistory  # noqa: E402, F401
+from prompt_toolkit.patch_stdout import patch_stdout  # noqa: E402, F401
 from rich.console import Console  # noqa: E402
-from rich.markdown import Markdown  # noqa: E402
 from rich.table import Table  # noqa: E402
-from rich.text import Text  # noqa: E402
 
 from pythinker import __logo__, __version__  # noqa: E402
+
+# Re-exported helpers (moved out of this module per .agents/plans/2026-05-04
+# §E1). Keep these imports so external callers and tests keep working:
+# `pythinker/cli/tui/app.py:276`, `tests/cli/test_commands.py`,
+# `tests/cli/test_cli_input.py`, `pythinker/cli/onboard_auth.py`.
+from pythinker.cli.bootstrap import (  # noqa: E402, F401
+    _load_browser_config,
+    _load_runtime_config,
+    _make_provider,
+    _warn_deprecated_config_keys,
+)
+from pythinker.cli.render import (  # noqa: E402, F401
+    EXIT_COMMANDS,
+    _is_exit_command,
+    _make_console,
+    _print_agent_response,
+    _print_cli_progress_line,
+    _print_interactive_line,
+    _print_interactive_progress_line,
+    _print_interactive_response,
+    _render_interactive_ansi,
+    _response_renderable,
+)
+from pythinker.cli.repl import (  # noqa: E402, F401
+    SafeFileHistory,
+    _flush_pending_tty_input,
+    _init_prompt_session,
+    _read_interactive_input_async,
+    _restore_terminal,
+)
+from pythinker.cli.serve import (  # noqa: E402, F401
+    _get_websocket_channel,
+    _preflight_port_or_die,
+    _print_webui_startup_status,
+    _webui_url_from_channel,
+)
 from pythinker.cli.star_prompt import maybe_prompt_github_star  # noqa: E402
 from pythinker.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
+from pythinker.cli.updates import (  # noqa: E402, F401
+    _maybe_emit_update_banner,
+    _maybe_log_update_status,
+    _run_in_place_upgrade,
+    _updates_enabled,
+)
 from pythinker.config.paths import get_update_dir, is_default_workspace  # noqa: E402
 from pythinker.config.schema import Config  # noqa: E402
 from pythinker.utils.helpers import sync_workspace_templates  # noqa: E402
@@ -58,28 +100,12 @@ from pythinker.utils.restart import (  # noqa: E402
 )
 from pythinker.utils.update import (  # noqa: E402
     InstallMethod,
-    UpdateInfo,
     check_for_update_sync,
-    format_banner,
-    mark_notified,
     suggested_target_command,
     suggested_upgrade_command,
     target_install_command,
     upgrade_command,
 )
-
-
-class SafeFileHistory(FileHistory):
-    """FileHistory subclass that sanitizes surrogate characters on write.
-
-    On Windows, special Unicode input (emoji, mixed-script) can produce
-    surrogate characters that crash prompt_toolkit's file write.
-    See issue #2846.
-    """
-
-    def store_string(self, string: str) -> None:
-        safe = string.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
-        super().store_string(safe)
 
 app = typer.Typer(
     name="pythinker",
@@ -126,392 +152,18 @@ release_app = typer.Typer(
 app.add_typer(release_app, name="release")
 
 console = Console()
-EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
 
 # ---------------------------------------------------------------------------
 # CLI input: prompt_toolkit for editing, paste, history, and display
 # ---------------------------------------------------------------------------
 
+# Mutable REPL state owned by this module so tests that read/write
+# ``commands._PROMPT_SESSION`` and ``commands._SAVED_TERM_ATTRS`` (see
+# ``tests/cli/test_cli_input.py``) keep working after the §E1 split.
+# The helpers in ``pythinker.cli.repl`` mutate these attributes through
+# ``pythinker.cli.commands`` so a single canonical store is preserved.
 _PROMPT_SESSION: PromptSession | None = None
 _SAVED_TERM_ATTRS = None  # original termios settings, restored on exit
-
-
-def _flush_pending_tty_input() -> None:
-    """Drop unread keypresses typed while the model was generating output."""
-    try:
-        fd = sys.stdin.fileno()
-        if not os.isatty(fd):
-            return
-    except Exception:
-        return
-
-    try:
-        import termios
-
-        termios.tcflush(fd, termios.TCIFLUSH)
-        return
-    except Exception:
-        pass
-
-    try:
-        while True:
-            ready, _, _ = select.select([fd], [], [], 0)
-            if not ready:
-                break
-            if not os.read(fd, 4096):
-                break
-    except Exception:
-        return
-
-
-def _restore_terminal() -> None:
-    """Restore terminal to its original state (echo, line buffering, etc.)."""
-    if _SAVED_TERM_ATTRS is None:
-        return
-    try:
-        import termios
-
-        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
-    except Exception:
-        pass
-
-
-def _init_prompt_session() -> None:
-    """Create the prompt_toolkit session with persistent file history."""
-    global _PROMPT_SESSION, _SAVED_TERM_ATTRS
-
-    # Save terminal state so we can restore it on exit
-    try:
-        import termios
-
-        _SAVED_TERM_ATTRS = termios.tcgetattr(sys.stdin.fileno())
-    except Exception:
-        pass
-
-    from pythinker.config.paths import get_cli_history_path
-
-    history_file = get_cli_history_path()
-    history_file.parent.mkdir(parents=True, exist_ok=True)
-
-    _PROMPT_SESSION = PromptSession(
-        history=SafeFileHistory(str(history_file)),
-        enable_open_in_editor=False,
-        multiline=False,  # Enter submits (single line mode)
-    )
-
-
-def _make_console() -> Console:
-    return Console(file=sys.stdout)
-
-
-def _render_interactive_ansi(render_fn) -> str:
-    """Render Rich output to ANSI so prompt_toolkit can print it safely."""
-    ansi_console = Console(
-        force_terminal=sys.stdout.isatty(),
-        color_system=console.color_system or "standard",
-        width=console.width,
-    )
-    with ansi_console.capture() as capture:
-        render_fn(ansi_console)
-    return capture.get()
-
-
-def _print_agent_response(
-    response: str,
-    render_markdown: bool,
-    metadata: dict | None = None,
-) -> None:
-    """Render assistant response with consistent terminal styling."""
-    console = _make_console()
-    content = response or ""
-    body = _response_renderable(content, render_markdown, metadata)
-    console.print()
-    console.print(f"[cyan]{__logo__} pythinker[/cyan]")
-    console.print(body)
-    console.print()
-
-
-def _response_renderable(content: str, render_markdown: bool, metadata: dict | None = None):
-    """Render plain-text command output without markdown collapsing newlines."""
-    if not render_markdown:
-        return Text(content)
-    if (metadata or {}).get("render_as") == "text":
-        return Text(content)
-    return Markdown(content)
-
-
-async def _print_interactive_line(text: str) -> None:
-    """Print async interactive updates with prompt_toolkit-safe Rich styling."""
-    def _write() -> None:
-        ansi = _render_interactive_ansi(
-            lambda c: c.print(f"[dim]  ↳ {text}[/dim]")
-        )
-        print_formatted_text(ANSI(ansi), end="")
-
-    await run_in_terminal(_write)
-
-
-async def _print_interactive_response(
-    response: str,
-    render_markdown: bool,
-    metadata: dict | None = None,
-) -> None:
-    """Print async interactive replies with prompt_toolkit-safe Rich styling."""
-    def _write() -> None:
-        content = response or ""
-        ansi = _render_interactive_ansi(
-            lambda c: (
-                c.print(),
-                c.print(f"[cyan]{__logo__} pythinker[/cyan]"),
-                c.print(_response_renderable(content, render_markdown, metadata)),
-                c.print(),
-            )
-        )
-        print_formatted_text(ANSI(ansi), end="")
-
-    await run_in_terminal(_write)
-
-
-def _print_cli_progress_line(text: str, thinking: ThinkingSpinner | None) -> None:
-    """Print a CLI progress line, pausing the spinner if needed."""
-    with thinking.pause() if thinking else nullcontext():
-        console.print(f"[dim]  ↳ {text}[/dim]")
-
-
-async def _print_interactive_progress_line(text: str, thinking: ThinkingSpinner | None) -> None:
-    """Print an interactive progress line, pausing the spinner if needed."""
-    with thinking.pause() if thinking else nullcontext():
-        await _print_interactive_line(text)
-
-
-def _is_exit_command(command: str) -> bool:
-    """Return True when input should end interactive chat."""
-    return command.lower() in EXIT_COMMANDS
-
-
-def _updates_enabled(config: Config | None = None) -> bool:
-    if os.environ.get("PYTHINKER_NO_UPDATE_CHECK") == "1":
-        return False
-    if config is None:
-        return True
-    try:
-        return bool(config.updates.check)
-    except AttributeError:
-        return True
-
-
-def _maybe_emit_update_banner(config: Config | None = None) -> None:
-    """Print a one-line update banner in interactive CLI sessions, throttled by cache.
-
-    When stdin is a TTY, also offer an interactive yes/no prompt to run the
-    upgrade right now.  Decline / non-TTY just prints the suggested command.
-    """
-    if not _updates_enabled(config):
-        return
-    try:
-        info = check_for_update_sync()
-    except Exception:
-        return  # silent — never break startup over an update check
-    if not info.update_available and not info.is_yanked:
-        return
-    suppress_for_already_notified = (
-        info.latest
-        and info.latest == info.last_notified
-        and not info.is_yanked
-    )
-    if suppress_for_already_notified:
-        return
-    line = format_banner(info)
-    if not line:
-        return
-    console.print(f"[dim]{line}[/dim]")
-    if info.latest:
-        try:
-            mark_notified(info.latest)
-        except Exception:
-            pass
-
-    # Interactive upgrade prompt. Only when:
-    #  • stdin is a TTY
-    #  • we have a safe upgrade command for this install method
-    #  • not running with --no-update-check
-    if not sys.stdin.isatty():
-        return
-    cmd = upgrade_command(info.install_method)
-    if cmd is None:
-        return
-    try:
-        prompt = f"Upgrade pythinker to {info.latest} now? [y/N] "
-        answer = input(prompt).strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        console.print()
-        return
-    if answer not in {"y", "yes"}:
-        return
-    _run_in_place_upgrade(info, cmd)
-
-
-def _run_in_place_upgrade(info: UpdateInfo, cmd: list[str]) -> None:
-    """Run the upgrade subprocess under a filelock and re-exec on success."""
-    import subprocess
-
-    from filelock import FileLock
-    from filelock import Timeout as FileLockTimeout
-
-    lock_path = get_update_dir() / ".lock"
-    try:
-        with FileLock(str(lock_path)).acquire(blocking=False):
-            console.print(f"Running: [cyan]{' '.join(cmd)}[/cyan]")
-            try:
-                proc = subprocess.run(cmd, check=False)
-            except FileNotFoundError:
-                console.print(
-                    f"[red]Could not find {cmd[0]} on PATH.[/red] "
-                    f"Run manually: [cyan]{suggested_upgrade_command(info.install_method)}[/cyan]"
-                )
-                return
-    except FileLockTimeout as e:
-        console.print(
-            f"[yellow]Another upgrade is in progress (lock: {e.lock_file}).[/yellow]"
-        )
-        return
-
-    if proc.returncode != 0:
-        console.print(f"[red]Upgrade failed (exit {proc.returncode}).[/red]")
-        return
-
-    console.print("[green]✓ Upgrade complete. Restarting pythinker...[/green]")
-    if sys.platform != "win32":
-        set_restart_notice_to_env(channel="cli", chat_id="upgrade", reason="upgrade")
-        os.execv(sys.executable, [sys.executable, "-m", "pythinker"] + sys.argv[1:])
-    else:
-        console.print("Please restart pythinker to use the new version.")
-
-
-def _maybe_log_update_status(config: Config | None = None) -> None:
-    """Log a one-line update status from the gateway boot path (no console banner)."""
-    if not _updates_enabled(config):
-        return
-    try:
-        info = check_for_update_sync()
-    except Exception:
-        return
-    if info.is_yanked and info.latest:
-        logger.warning(
-            "Your pythinker {} was yanked from PyPI. Upgrade to {}.",
-            info.current,
-            info.latest,
-        )
-        return
-    if info.update_available and info.latest:
-        logger.info(
-            "pythinker {} is available (you have {}). Run: {}",
-            info.latest,
-            info.current,
-            suggested_upgrade_command(info.install_method),
-        )
-
-
-async def _read_interactive_input_async() -> str:
-    """Read user input using prompt_toolkit (handles paste, history, display).
-
-    prompt_toolkit natively handles:
-    - Multiline paste (bracketed paste mode)
-    - History navigation (up/down arrows)
-    - Clean display (no ghost characters or artifacts)
-    """
-    if _PROMPT_SESSION is None:
-        raise RuntimeError("Call _init_prompt_session() first")
-    try:
-        with patch_stdout():
-            return await _PROMPT_SESSION.prompt_async(
-                HTML("<b fg='ansiblue'>You:</b> "),
-            )
-    except EOFError as exc:
-        raise KeyboardInterrupt from exc
-
-
-def _preflight_port_or_die(host: str, port: int, *, label: str = "Service") -> None:
-    """Bail out with a clear, actionable message if ``host:port`` is already bound.
-
-    Without this, the gateway/serve startup logs "✓ Cron / ✓ Heartbeat / Agent loop
-    started" several seconds before crashing with a raw asyncio EADDRINUSE traceback,
-    which is confusing. We probe the bind upfront and raise typer.Exit(1) on failure.
-    """
-    import errno
-    import socket
-
-    bind_host = host or "127.0.0.1"
-    fam = socket.AF_INET6 if ":" in bind_host else socket.AF_INET
-    sock = socket.socket(fam, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    try:
-        sock.bind((bind_host, port))
-    except OSError as exc:
-        sock.close()
-        if exc.errno not in (errno.EADDRINUSE, errno.EACCES):
-            raise
-        kind = "already in use" if exc.errno == errno.EADDRINUSE else "permission denied"
-        console.print(
-            f"[red]Error:[/red] {label} cannot bind {bind_host}:{port} — {kind}."
-        )
-        if sys.platform == "win32":
-            console.print(
-                f"  Find the process: [cyan]netstat -ano | findstr :{port}[/cyan]"
-            )
-        else:
-            console.print(
-                f"  Find the process: [cyan]ss -ltnp 'sport = :{port}'[/cyan]  "
-                f"or  [cyan]lsof -iTCP:{port} -sTCP:LISTEN -P[/cyan]"
-            )
-        if exc.errno == errno.EADDRINUSE:
-            console.print(
-                "  Then either stop the existing process ([cyan]kill <pid>[/cyan]) "
-                "or rerun with a different port ([cyan]--port <N>[/cyan])."
-            )
-        raise typer.Exit(1)
-    else:
-        sock.close()
-
-
-def _get_websocket_channel(channels: Any) -> Any | None:
-    get_channel = getattr(channels, "get_channel", None)
-    if callable(get_channel):
-        return get_channel("websocket")
-    channel_map = getattr(channels, "channels", None)
-    if isinstance(channel_map, dict):
-        return channel_map.get("websocket")
-    return None
-
-
-def _webui_url_from_channel(channel: Any) -> str:
-    cfg = getattr(channel, "config", {})
-
-    def _cfg(name: str, default: Any) -> Any:
-        if isinstance(cfg, dict):
-            return cfg.get(name, default)
-        return getattr(cfg, name, default)
-
-    host = str(_cfg("host", "127.0.0.1") or "127.0.0.1").strip()
-    if host in {"0.0.0.0", "::"}:
-        host = "127.0.0.1"
-    elif ":" in host and not host.startswith("["):
-        host = f"[{host}]"
-    port = int(_cfg("port", 8765))
-    ssl_cert = str(_cfg("ssl_certfile", "") or "").strip()
-    ssl_key = str(_cfg("ssl_keyfile", "") or "").strip()
-    scheme = "https" if ssl_cert and ssl_key else "http"
-    return f"{scheme}://{host}:{port}/"
-
-
-def _print_webui_startup_status(websocket_channel: Any | None) -> None:
-    if websocket_channel is not None:
-        console.print(f"[green]✓[/green] WebUI: {_webui_url_from_channel(websocket_channel)}")
-        return
-    console.print(
-        "[dim]WebUI: disabled "
-        "(add channels.websocket.enabled=true to serve http://127.0.0.1:8765/)[/dim]"
-    )
 
 
 def version_callback(value: bool):
@@ -693,82 +345,6 @@ def _onboard_plugins(config_path: Path) -> None:
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     ensure_config_file_permissions(config_path)
-
-
-def _make_provider(config: Config):
-    """CLI-facing provider builder.
-
-    Delegates to the canonical `providers.factory.make_provider` and
-    translates the factory's ValueError into Rich-formatted messages plus
-    `typer.Exit(1)`. Validation logic lives in the factory; the CLI only
-    chooses how to surface the result.
-    """
-    from pythinker.providers.factory import make_provider
-
-    try:
-        return make_provider(config)
-    except ValueError as exc:
-        msg = str(exc)
-        # Surface the canonical hints alongside the factory's reason so
-        # users see both "what" and "where to fix it" without the CLI
-        # re-implementing validation.
-        if "Azure OpenAI" in msg:
-            console.print(f"[red]Error: {msg}[/red]")
-            console.print("Set api_key and api_base in ~/.pythinker/config.json under providers.azure_openai")
-            console.print("Use the model field to specify the deployment name.")
-        elif "No API key configured" in msg:
-            console.print(f"[red]Error: {msg}[/red]")
-            console.print("Set one in ~/.pythinker/config.json under providers section")
-        else:
-            console.print(f"[red]Error: {msg}[/red]")
-        raise typer.Exit(1) from exc
-
-
-def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
-    """Load config and optionally override the active workspace."""
-    from pythinker.config.loader import load_config, resolve_config_env_vars, set_config_path
-
-    config_path = None
-    if config:
-        config_path = Path(config).expanduser().resolve()
-        if not config_path.exists():
-            console.print(f"[red]Error: Config file not found: {config_path}[/red]")
-            raise typer.Exit(1)
-        set_config_path(config_path)
-        console.print(f"[dim]Using config: {config_path}[/dim]")
-
-    try:
-        loaded = resolve_config_env_vars(load_config(config_path))
-    except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
-        raise typer.Exit(1)
-    _warn_deprecated_config_keys(config_path)
-    if workspace:
-        loaded.agents.defaults.workspace = workspace
-    return loaded
-
-
-def _load_browser_config():
-    """Load the latest browser tool config for turn-boundary hot reload."""
-    from pythinker.config.loader import load_config, resolve_config_env_vars
-
-    return resolve_config_env_vars(load_config()).tools.web.browser
-
-
-def _warn_deprecated_config_keys(config_path: Path | None) -> None:
-    """Hint users to remove obsolete keys from their config file."""
-    import json
-
-    from pythinker.config.loader import get_config_path
-
-    path = config_path or get_config_path()
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return
-    if "memoryWindow" in raw.get("agents", {}).get("defaults", {}):
-        console.print("[dim]Hint: `memoryWindow` in your config is no longer used "
-            "and can be safely removed.[/dim]")
 
 
 def _migrate_cron_store(config: "Config") -> None:

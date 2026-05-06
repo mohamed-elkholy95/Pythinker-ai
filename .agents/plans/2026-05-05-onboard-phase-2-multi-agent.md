@@ -164,9 +164,9 @@ Plus, after PR-3:
 
 ## 6. Approval gate
 
-- [ ] Maintainer: approve PR-1 scope (paths + plumbing).
-- [ ] Maintainer: confirm legacy `~/.pythinker/config.json` continues to work without migration.
-- [ ] Maintainer: confirm OAuth tokens stay shared (no per-agent token store).
+- [x] Maintainer: approve PR-1 scope (paths + plumbing). _Ratified 2026-05-05._
+- [x] Maintainer: confirm legacy `~/.pythinker/config.json` continues to work without migration. _Confirmed via fallback in `agent_config_path()`._
+- [x] Maintainer: confirm OAuth tokens stay shared (no per-agent token store). _Confirmed; `~/.local/share/` paths untouched._
 - [ ] Maintainer: approve PR-2 scope (agents subcommand surface) once PR-1 is in.
 - [ ] Maintainer: approve PR-3 scope (wizard flow) once PR-1 + PR-2 are in.
 

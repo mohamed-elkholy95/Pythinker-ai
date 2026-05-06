@@ -2,10 +2,54 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from pythinker.config.loader import get_config_path
 from pythinker.utils.helpers import ensure_dir
+
+_DEFAULT_AGENT_ID = "default"
+
+
+def current_agent_id() -> str:
+    """Return the currently active agent id.
+
+    Resolution order:
+      1. ``$PYTHINKER_AGENT_ID`` env var (non-empty wins).
+      2. The single-line ``~/.pythinker/current-agent`` marker file, if it exists
+         and is readable.
+      3. ``"default"``.
+
+    A bad / unreadable marker file falls through silently — not the kind of
+    thing that should refuse to load the wizard.
+    """
+    env_value = os.environ.get("PYTHINKER_AGENT_ID", "").strip()
+    if env_value:
+        return env_value
+    marker = Path.home() / ".pythinker" / "current-agent"
+    try:
+        text = marker.read_text(encoding="utf-8").strip()
+    except (FileNotFoundError, OSError):
+        return _DEFAULT_AGENT_ID
+    return text or _DEFAULT_AGENT_ID
+
+
+def agent_dir(agent_id: str) -> Path:
+    """Return ``~/.pythinker/agents/<id>/`` as a Path. Does not create it."""
+    return Path.home() / ".pythinker" / "agents" / agent_id
+
+
+def agent_config_path(agent_id: str) -> Path:
+    """Return the config-file path for ``agent_id``, with legacy fallback.
+
+    If ``~/.pythinker/agents/<id>/`` exists, returns ``<that>/config.json``.
+    Otherwise falls back to the legacy single-config path ``~/.pythinker/config.json``
+    so existing single-agent installs keep working unchanged.
+    """
+    candidate = agent_dir(agent_id) / "config.json"
+    if candidate.parent.is_dir():
+        return candidate
+    return Path.home() / ".pythinker" / "config.json"
 
 
 def get_data_dir() -> Path:

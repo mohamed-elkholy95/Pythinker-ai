@@ -23,10 +23,24 @@ def set_config_path(path: Path) -> None:
 
 
 def get_config_path() -> Path:
-    """Get the configuration file path."""
+    """Get the configuration file path.
+
+    Resolution order:
+      1. Explicit override set via ``set_config_path()`` (used by ``--config`` /
+         tests).
+      2. The current agent's config (``~/.pythinker/agents/<id>/config.json``)
+         when ``$PYTHINKER_AGENT_ID`` or the ``current-agent`` marker file
+         resolves to an agent dir that exists. Falls through to (3) when the
+         agent dir is absent so single-config installs keep working.
+      3. Legacy single-config path ``~/.pythinker/config.json``.
+    """
     if _current_config_path:
         return _current_config_path
-    return Path.home() / ".pythinker" / "config.json"
+    # Inline import: pythinker.config.paths imports from this module, so a
+    # top-of-file import would create a cycle.
+    from pythinker.config.paths import agent_config_path, current_agent_id
+
+    return agent_config_path(current_agent_id())
 
 
 def load_config(config_path: Path | None = None) -> Config:

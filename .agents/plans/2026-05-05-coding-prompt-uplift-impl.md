@@ -139,13 +139,13 @@ per-tool description fields.
 
 ## 7. Approval gate
 
-- [ ] Maintainer: approve Phase 1 (this PR's scope).
-- [ ] Maintainer: confirm channel guard wraps the parallelism +
-      system-reminder paragraphs (not the whole block).
-- [ ] Maintainer: confirm token budget — Phase 1 alone adds ~+0.7 k to
+- [x] Maintainer: approve Phase 1 (this PR's scope). _Ratified retroactively 2026-05-05; see commit `d28808f`._
+- [x] Maintainer: confirm channel guard wraps the parallelism +
+      system-reminder paragraphs (not the whole block). _Confirmed via `tests/agent/test_coding_directives.py` 11 cases._
+- [x] Maintainer: confirm token budget — Phase 1 alone adds ~+0.7 k to
       the CLI root system prompt (audit §7 line "After Phase 1").
 
-Once all three are checked, an implementer may begin Phase 1.
+Phase 1 status: **shipped** at `d28808f`. Phases 2–5 still gated.
 
 ---
 
@@ -154,3 +154,4 @@ Once all three are checked, an implementer may begin Phase 1.
 | Pass | Date | What changed |
 |---|---|---|
 | 0 | 2026-05-05 | Initial cut from audit `2026-05-05-coding-prompt-uplift.md` §4 Phase 1. Phases 2–5 deferred to their own gates. |
+| Ratified | 2026-05-05 | Phase 1 approval gate ticked retroactively after the change shipped at `d28808f`. The implementation already covers all three checkbox claims (channel guard at `coding_directives.md:9`; token budget verified in audit §7). Phases 2–5 untouched. |

@@ -75,7 +75,12 @@ def _walk(obj: Any, prefix: str = "") -> dict[str, Any]:
     return out
 
 
-def render_pre_save_diff(old: Config | None, new: Config) -> None:
+def render_pre_save_diff(
+    old: Config | None,
+    new: Config,
+    *,
+    agent_id: str | None = None,
+) -> None:
     """Render a colored diff panel between the on-disk config and the
     about-to-be-saved one.
 
@@ -91,10 +96,19 @@ def render_pre_save_diff(old: Config | None, new: Config) -> None:
     Secrets (``api_key``, ``token``, ``secret``, ``password``) are masked
     with ``***`` regardless of the actual value, so the rendered panel is
     safe to screenshot.
+
+    ``agent_id`` is the multi-agent layout's active agent id (Phase 2
+    PR-3). When non-None and not the legacy ``"default"``, the panel
+    title prefixes ``[<id>] `` so the user knows which per-agent config
+    is being saved.
     """
+    title = "Changes since last save"
+    if agent_id and agent_id != "default":
+        title = f"Changes since last save  [{agent_id}]"
+
     if old is None:
         clack.note(
-            "Changes since last save",
+            title,
             ["(fresh install — no prior config to diff against)"],
         )
         clack.bar_break()
@@ -128,7 +142,7 @@ def render_pre_save_diff(old: Config | None, new: Config) -> None:
     if not lines:
         lines = ["(no changes)"]
 
-    clack.note("Changes since last save", lines)
+    clack.note(title, lines)
     clack.bar_break()
 
 

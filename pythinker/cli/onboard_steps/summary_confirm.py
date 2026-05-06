@@ -30,7 +30,7 @@ def _step_summary_confirm(ctx: _WizardContext) -> StepResult:
         existing_path = _onboard.get_config_path()
         if existing_path.exists():
             old_cfg = _onboard.load_config(existing_path)
-            render_pre_save_diff(old_cfg, ctx.draft)
+            render_pre_save_diff(old_cfg, ctx.draft, agent_id=ctx.agent_id)
     except Exception:  # noqa: BLE001
         pass
 

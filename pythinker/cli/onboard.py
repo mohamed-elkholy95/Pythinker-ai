@@ -186,6 +186,14 @@ _WIZARD_STEPS.extend([_step_banner, _step_intro])
 # then start_gateway which replaces the wizard process when accepted.
 
 
+# --- Step 2.5: Agent-id picker (only renders when ~/.pythinker/agents/ exists) ---
+# Phase 2 PR-3. On a single-config install (no agents/ dir) the step short-
+# circuits to ``skip`` so the rest of the wizard is byte-identical to today.
+from pythinker.cli.onboard_steps.agent_id import _step_agent_id  # noqa: F401, E402
+
+_WIZARD_STEPS.append(_step_agent_id)
+
+
 # --- Step 3: Security Disclaimer ---
 from pythinker.cli.onboard_steps.security_disclaimer import (  # noqa: F401, E402
     _step_security_disclaimer,

@@ -168,7 +168,7 @@ Plus, after PR-3:
 - [x] Maintainer: confirm legacy `~/.pythinker/config.json` continues to work without migration. _Confirmed via fallback in `agent_config_path()`._
 - [x] Maintainer: confirm OAuth tokens stay shared (no per-agent token store). _Confirmed; `~/.local/share/` paths untouched._
 - [x] Maintainer: approve PR-2 scope (agents subcommand surface) once PR-1 is in. _Approved + shipped 2026-05-06._
-- [ ] Maintainer: approve PR-3 scope (wizard flow) once PR-1 + PR-2 are in.
+- [x] Maintainer: approve PR-3 scope (wizard flow) once PR-1 + PR-2 are in. _Approved + shipped 2026-05-06._
 
 Once PR-1 box is ticked, an implementer may begin PR-1.
 
@@ -179,3 +179,4 @@ Once PR-1 box is ticked, an implementer may begin PR-1.
 | Pass | Date | What changed |
 |---|---|---|
 | 0 | 2026-05-05 | Initial cut. Successor to `tasks/todo.md` Phase 1 §"Out of scope" line 213. Three-PR phasing. |
+| Shipped | 2026-05-06 | All three PRs landed on dev. PR-1 paths + plumbing (`8078e5b`), PR-2 `pythinker agents` subcommand (`7aaf092`), PR-3 wizard multi-agent flow + summary panel agent-id prefix (this commit). 11 new wizard tests + 21 subcommand tests + 12 path tests. Single-config installs see no behavior change (new step short-circuits to `skip` when `~/.pythinker/agents/` doesn't exist). |

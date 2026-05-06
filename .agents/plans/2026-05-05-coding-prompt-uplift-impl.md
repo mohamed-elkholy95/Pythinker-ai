@@ -192,10 +192,36 @@ Phase 3 status: **shipped** at `<this commit>`.
 
 Phase 4 status: **shipped** at `<this commit>`.
 
-## 5. Phase 5 — Dynamic injection (deferred, conditional)
+## 5. Phase 5 — Dynamic injection (shipped 2026-05-06, scaffold)
 
-Defer. Conditional on Phase 4 landing per audit §4 Phase 5. Not in
-this PR.
+**Goal.** A single hook in the runner that periodically prepends or appends content to the next LLM call without polluting the persistent message history. Lets us layer plan-mode reminders, AFK-mode signals, and similar policy-owned context behind one seam.
+
+**Files.**
+
+- New: `pythinker/agent/dynamic_injection.py` — `DynamicInjection` dataclass, `DynamicInjectionProvider` ABC, `CompositeInjectionProvider` (swallows provider exceptions), `apply_injections` helper.
+- New: `pythinker/agent/dynamic_injections/__init__.py` — re-exports the bundled providers.
+- New: `pythinker/agent/dynamic_injections/plan_mode.py` — `PlanModeProvider` reads `${workspace}/.pythinker/plan.md`; emits the full plan on the first turn, sparse reminder every `sparse_every` turns. No-op when the file is absent.
+- New: `pythinker/agent/dynamic_injections/afk_mode.py` — `AfkModeProvider` emits a "no human listening" reminder for synthetic-origin channels (heartbeat / cron / scheduled). Iteration 0 only.
+- Edit: `pythinker/agent/runner.py` — `AgentRunSpec.dynamic_injection_provider: Any = None`; new helper `_apply_dynamic_injections` runs after `_prepare_messages_for_model` each iteration. Default `None` provider returns the input list unchanged so legacy callers see no behavior change. Provider exceptions are caught + logged + skipped — a buggy injector cannot break a turn.
+
+**Verification.**
+
+- `tests/agent/test_dynamic_injection.py` — 20 cases:
+  - `apply_injections` placement semantics (no-op / append / prepend-before-trailing-user / prepend-at-front).
+  - `CompositeInjectionProvider` swallows provider exceptions.
+  - `AgentRunSpec.dynamic_injection_provider` defaults to `None`.
+  - `PlanModeProvider`: no-op without plan file; full on turn 1; sparse on cadence; truncates oversize plans; per-session counters.
+  - `AfkModeProvider`: fires on heartbeat / cron / scheduled, silent on cli / telegram / slack / email, iteration-0 only, silent without session_key.
+
+**Scaffolding caveat.** Pythinker still has no `EnterPlanMode` / `ExitPlanMode` tools, so the plan-mode provider is opt-in: operators write `${workspace}/.pythinker/plan.md` themselves (or have `/init` write it for them — the audit anticipated this dependency chain).
+
+**Acceptance gate.**
+
+- [x] Maintainer: approve Phase 5 scope (scaffold + two example providers). _Approved + shipped 2026-05-06._
+- [x] Maintainer: confirm default `None` provider keeps current runner behavior unchanged. _Confirmed via `test_agent_run_spec_default_dynamic_injection_provider_is_none` + full pytest still green._
+- [x] Maintainer: confirm provider exceptions cannot break a turn. _Confirmed via `_apply_dynamic_injections` try/except path + `test_composite_swallows_provider_exceptions`._
+
+Phase 5 status: **shipped** at `<this commit>`. The audit's "real plan-mode user story" gate is partially satisfied (`/init` writes AGENTS.md but not yet `plan.md`) — adding plan-file generation to `init_agents_md.md` is a candidate Phase 6 if a workflow demands it.
 
 ---
 
@@ -230,3 +256,4 @@ Phase 1 status: **shipped** at `d28808f`. Phases 2–5 still gated.
 | Phase 2 | 2026-05-06 | Phase 2 shipped: subagent role split (coder / explore / plan) with tool gating + role-specific prompts. Three new templates, ~30 LOC change in `subagent.py`, ~10 LOC schema change in `spawn.py`, 10 new tests. Approval gate ticked. Phases 3–5 still deferred. |
 | Phase 3 | 2026-05-06 | Phase 3 shipped: structured compaction prompt (six flat section tags). Template-only change to `consolidator_archive.md`; 0 LOC of code change. 2 new prompt-shape tests; existing 8 consolidator tests still green. Approval gate ticked. Phases 4–5 still deferred. |
 | Phase 4 | 2026-05-06 | Phase 4 shipped: `/init` slash command. New template + new `cmd_init` handler + router registration + metadata row. Republishes the rendered prompt as an `InboundMessage` so the agent's normal tool-use loop walks the project and writes `AGENTS.md`. 5 new tests. Approval gate ticked. Phase 5 still deferred (conditional). |
+| Phase 5 | 2026-05-06 | Phase 5 shipped (scaffold): dynamic-injection interface + bundled `PlanModeProvider` + `AfkModeProvider`. Single runner hook in `_apply_dynamic_injections`; default `None` provider keeps current behavior unchanged. 20 new tests covering placement, exception isolation, plan cadence, AFK channel gating. **All five phases of the coding-prompt uplift now shipped.** |

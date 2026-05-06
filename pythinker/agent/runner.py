@@ -113,6 +113,11 @@ class AgentRunSpec:
     # egress is set; both default to None to preserve legacy behaviour.
     egress: "EgressGateway | None" = None
     request_context: "RequestContext | None" = None
+    # Phase 5 of `.agents/plans/2026-05-05-coding-prompt-uplift.md` — when
+    # set, ``DynamicInjectionProvider.get_injections`` is consulted before
+    # each LLM call and any results are woven into ``messages_for_model``
+    # via ``apply_injections``. Default ``None`` keeps legacy behavior.
+    dynamic_injection_provider: Any = None
 
     def __post_init__(self) -> None:
         # Governed-execution invariant: egress + request_context are wired
@@ -291,6 +296,9 @@ class AgentRunner:
 
         for iteration in range(spec.max_iterations):
             messages_for_model = self._prepare_messages_for_model(spec, messages, iteration)
+            messages_for_model = self._apply_dynamic_injections(
+                spec, messages_for_model, iteration,
+            )
             context = AgentHookContext(iteration=iteration, messages=messages)
             await hook.before_iteration(context)
             response = await self._request_model(spec, messages_for_model, hook, context)
@@ -516,6 +524,41 @@ class AgentRunner:
         if spec.reasoning_effort is not None:
             kwargs["reasoning_effort"] = spec.reasoning_effort
         return kwargs
+
+    def _apply_dynamic_injections(
+        self,
+        spec: AgentRunSpec,
+        messages_for_model: list[dict[str, Any]],
+        iteration: int,
+    ) -> list[dict[str, Any]]:
+        """Phase 5 hook: prepend / append dynamic-injection content if a provider is wired.
+
+        Default ``None`` provider returns the input unchanged so legacy
+        behavior is preserved. Any exception in the provider drops the
+        injection and lets the turn proceed — a buggy injector must not
+        break the turn.
+        """
+        provider = spec.dynamic_injection_provider
+        if provider is None:
+            return messages_for_model
+        try:
+            from pythinker.agent.dynamic_injection import apply_injections
+
+            injections = provider.get_injections(
+                messages_for_model,
+                iteration=iteration,
+                session_key=spec.session_key,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Dynamic-injection provider raised on turn {} for {}: {}; "
+                "continuing without injections",
+                iteration,
+                spec.session_key or "default",
+                exc,
+            )
+            return messages_for_model
+        return apply_injections(messages_for_model, injections or [])
 
     def _prepare_messages_for_model(
         self,

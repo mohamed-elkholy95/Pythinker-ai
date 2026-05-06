@@ -1363,6 +1363,73 @@ def test_step_workspace_non_interactive_uses_default(tmp_path, monkeypatch):
     assert ws.exists()
 
 
+def test_step_workspace_already_populated_prompts_for_action(tmp_path):
+    """Existing pythinker-marker dir surfaces the configured-action picker."""
+    from pythinker.cli.onboard import _step_workspace
+
+    populated = tmp_path / "existing-ws"
+    populated.mkdir()
+    (populated / "MEMORY.md").write_text("legacy")  # marker
+
+    fresh = tmp_path / "fresh-ws"
+
+    inputs = iter([str(populated), str(fresh)])
+    ctx = _WizardContext(draft=Config())
+    with patch(
+        "pythinker.cli.onboard_views.clack.text",
+        side_effect=lambda *a, **kw: next(inputs),
+    ), patch(
+        "pythinker.cli.onboard._prompt_configured_action",
+        return_value="skip",
+    ) as mock_action:
+        result = _step_workspace(ctx)
+
+    assert result.status == "continue"
+    assert ctx.draft.agents.defaults.workspace == str(fresh)
+    mock_action.assert_called_once()
+
+
+def test_step_workspace_already_populated_use_existing(tmp_path):
+    """``update`` action (Use existing workspace) keeps the populated dir."""
+    from pythinker.cli.onboard import _step_workspace
+
+    populated = tmp_path / "existing-ws"
+    populated.mkdir()
+    (populated / "history.jsonl").write_text("")  # marker
+
+    ctx = _WizardContext(draft=Config())
+    with patch(
+        "pythinker.cli.onboard_views.clack.text",
+        return_value=str(populated),
+    ), patch(
+        "pythinker.cli.onboard._prompt_configured_action",
+        return_value="update",
+    ):
+        result = _step_workspace(ctx)
+
+    assert result.status == "continue"
+    assert ctx.draft.agents.defaults.workspace == str(populated)
+
+
+def test_step_workspace_fresh_dir_skips_picker(tmp_path):
+    """Empty / non-existent dir does not trigger the configured-action picker."""
+    from pythinker.cli.onboard import _step_workspace
+
+    ws = tmp_path / "fresh"
+
+    ctx = _WizardContext(draft=Config())
+    with patch(
+        "pythinker.cli.onboard_views.clack.text",
+        return_value=str(ws),
+    ), patch(
+        "pythinker.cli.onboard._prompt_configured_action",
+    ) as mock_action:
+        result = _step_workspace(ctx)
+
+    assert result.status == "continue"
+    mock_action.assert_not_called()
+
+
 def test_step_channels_skipped_in_quickstart():
     from pythinker.cli.onboard import _step_channels
 

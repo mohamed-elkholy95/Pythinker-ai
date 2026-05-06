@@ -10,6 +10,7 @@
     <a href="https://pepy.tech/projects/pythinker-ai"><img src="https://img.shields.io/pepy/dt/pythinker-ai?label=downloads&color=%2312b76a&cacheSeconds=600" alt="Downloads"></a>
     <img src="https://img.shields.io/badge/python-%E2%89%A53.11-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+    <img src="https://visitor-badge.laobi.icu/badge?page_id=mohamed-elkholy95.Pythinker-ai" alt="Visitors">
   </p>
 </div>
 
@@ -26,7 +27,7 @@
 - **Provider hot-reload** — edits to model / provider / API key in `~/.pythinker/config.json` land at the next turn boundary. No restart of the SDK or gateway. Same-signature snapshots short-circuit; broken configs are logged and swallowed so an in-flight session can't crash on a typo.
 - **Headless browser tool** *(opt-in)* — drives Playwright-managed Chromium for JavaScript-rendered pages, click/form flows, screenshots, and DOM snapshots. `mode="auto"` launches a packaged headless Chromium without Docker; `mode="cdp"` connects to an external service for hardened deployments. First-use Chromium binary installs lazily, with idle eviction, per-context page caps, SSRF route handling, and turn-boundary hot reload of browser config.
 - **Governed-execution runtime** *(off by default)* — opt-in `RuntimeConfig` wires a `PolicyService` (allow-lists from agent manifests, per-turn budgets, recursion depth), a `ToolEgressGateway` chokepoint, an `AgentRegistry` directory loader, `RequestContext` + `BudgetCounters` plumbing, and a pluggable `TelemetrySink` (loguru / JSONL / composite). When the loader is `None` and policy is off, the runtime is bit-for-bit identical to the legacy path.
-- **Autonomous subagent tracking** — spawned subagents are first-class task records with durable output under `.pythinker/task-results/`. Use `/tasks`, `/task-output <task_id>`, and `/task-stop <task_id>` to inspect or stop background work from chat.
+- **Autonomous subagent tracking** — spawned subagents are first-class task records with durable output under `.pythinker/task-results/`. Pick a role at spawn time — `coder` (full tools), `explore` (read-only navigation), or `plan` (planning-only, no write/edit/shell) — and use `/tasks`, `/task-output <task_id>`, and `/task-stop <task_id>` to inspect or stop background work from chat.
 - **Memory that learns** — a two-phase "Dream" process consolidates long-term memory into `MEMORY.md` / `SOUL.md` / `USER.md`, auto-versioned with pure-Python git.
 - **Skills & MCP** — bundled skills (GitHub, cron, weather, tmux, summarize, skill-creator, …) plus first-class [Model Context Protocol](https://modelcontextprotocol.io/) tool access.
 - **Research-grade PDF reports** — opt-in `make_pdf` tool renders structured Markdown to a styled PDF via ReportLab (`pip install 'pythinker-ai[reports]'`).
@@ -183,6 +184,8 @@ pythinker tui                               # full-screen interactive chat (alia
 
 `pythinker onboard` ships a config preconfigured for **OpenAI Codex via ChatGPT OAuth** (no API key needed). To use a different provider/model, edit `~/.pythinker/config.json` — see [Configuration](https://github.com/mohamed-elkholy95/Pythinker-ai/blob/main/docs/configuration.md) for the full catalog of 25+ providers.
 
+Want several independent agents on one host? `pythinker agents` lays out per-agent configs under `~/.pythinker/agents/<name>/` with isolated workspace, history, and memory; pass `--agent <name>` to any subcommand to target one.
+
 - Want different LLM providers, web search, MCP, security settings, or more config options? See [Configuration](https://github.com/mohamed-elkholy95/Pythinker-ai/blob/main/docs/configuration.md).
 - Want to run Pythinker in chat apps like Telegram, Discord, Slack, WhatsApp, or Matrix? See [Chat Apps](https://github.com/mohamed-elkholy95/Pythinker-ai/blob/main/docs/chat-apps.md).
 - Want Docker or Linux service deployment? See [Deployment](https://github.com/mohamed-elkholy95/Pythinker-ai/blob/main/docs/deployment.md).
@@ -224,6 +227,8 @@ pythinker tui --logs ~/.pythinker/tui.log   # mirror loguru output to a file
 | `/provider` | Switch LLM provider |
 | `/theme` | Swap between `default` and `monochrome` themes (persisted to `cli.tui.theme`) |
 | `/mcp` | Show MCP status — configured servers, connected servers, registered tools; `/mcp reconnect` reloads MCP config and reconnects |
+| `/login` / `/logout` | OAuth sign-in / sign-out for providers like OpenAI Codex and GitHub Copilot, with in-terminal prompts |
+| `/init` | Generate a tuned `AGENTS.md` for the current workspace from the bundled template |
 | `/clear` | Clear the chat pane (`/clear --hard` also wipes session memory) |
 | `/exit` | Quit |
 

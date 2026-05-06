@@ -21,7 +21,64 @@ if TYPE_CHECKING:
     from pythinker.cli.tui.app import TuiApp
 
 
-async def run_oauth_login_in_terminal(spec) -> tuple[bool, str]:
+def _stored_oauth_token(spec):
+    """Return a non-empty saved OAuth token for ``spec``, or ``None``.
+
+    Read-only: never triggers an interactive flow. Any failure (missing file,
+    parse error, refresh failure with no usable cached token) is treated as
+    "no saved token" so the caller falls through to the login picker.
+    """
+    try:
+        if spec.name == "openai_codex":
+            from oauth_cli_kit import get_token as _get
+            tok = _get()
+        elif spec.name == "github_copilot":
+            from pythinker.providers.github_copilot_provider import (
+                get_github_copilot_login_status as _get,
+            )
+            tok = _get()
+        else:
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+    if tok and getattr(tok, "access", None):
+        return tok
+    return None
+
+
+def _run_oauth_flow(login_fn, *, headless: bool) -> tuple[bool, str]:
+    """Run an OAuth login under ``run_in_terminal``. Returns ``(ok, detail)``.
+
+    ``headless=True`` suppresses ``webbrowser.open`` so the URL is just printed
+    for the user to open elsewhere (SSH session, sandbox without a browser).
+    """
+    import webbrowser
+
+    from pythinker.auth.oauth_remote import run_oauth_with_hint
+
+    print()
+    original_open = webbrowser.open
+    if headless:
+        webbrowser.open = lambda *_a, **_kw: False  # type: ignore[assignment]
+    try:
+        token = run_oauth_with_hint(
+            login_fn,
+            print_fn=print,
+            prompt_fn=input,
+        )
+    except (KeyboardInterrupt, EOFError):
+        return False, "cancelled"
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+    finally:
+        if headless:
+            webbrowser.open = original_open  # type: ignore[assignment]
+    if not token or not getattr(token, "access", None):
+        return False, "no token returned"
+    return True, getattr(token, "account_id", None) or "(no account_id)"
+
+
+async def run_oauth_login_in_terminal(spec, *, headless: bool = False) -> tuple[bool, str]:
     """Drive the OAuth/device-code flow for ``spec`` inside the live TUI.
 
     ``run_in_terminal`` lets prompt_toolkit yield the screen back to plain
@@ -35,41 +92,61 @@ async def run_oauth_login_in_terminal(spec) -> tuple[bool, str]:
     """
     from prompt_toolkit.application import run_in_terminal
 
-    from pythinker.auth.oauth_remote import run_oauth_with_hint
-
-    def _do() -> tuple[bool, str]:
-        if spec.name == "openai_codex":
-            try:
-                from oauth_cli_kit.flow import login_oauth_interactive
-            except Exception as exc:  # noqa: BLE001
-                return False, f"oauth_cli_kit unavailable: {exc}"
-            login_fn = login_oauth_interactive
-        elif spec.name == "github_copilot":
-            try:
-                from pythinker.providers.github_copilot_provider import (
-                    login_github_copilot,
-                )
-            except Exception as exc:  # noqa: BLE001
-                return False, f"copilot login unavailable: {exc}"
-            login_fn = login_github_copilot
-        else:
-            return False, f"OAuth not implemented for {spec.name}"
-        print()
+    if spec.name == "openai_codex":
         try:
-            token = run_oauth_with_hint(
-                login_fn,
-                print_fn=print,
-                prompt_fn=input,
-            )
-        except (KeyboardInterrupt, EOFError):
-            return False, "cancelled"
+            from oauth_cli_kit.flow import login_oauth_interactive
         except Exception as exc:  # noqa: BLE001
-            return False, str(exc)
-        if not token or not getattr(token, "access", None):
-            return False, "no token returned"
-        return True, getattr(token, "account_id", None) or "(no account_id)"
+            return False, f"oauth_cli_kit unavailable: {exc}"
+        login_fn = login_oauth_interactive
+    elif spec.name == "github_copilot":
+        try:
+            from pythinker.providers.github_copilot_provider import (
+                login_github_copilot,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return False, f"copilot login unavailable: {exc}"
+        login_fn = login_github_copilot
+    else:
+        return False, f"OAuth not implemented for {spec.name}"
 
-    return await run_in_terminal(_do)
+    return await run_in_terminal(lambda: _run_oauth_flow(login_fn, headless=headless))
+
+
+async def _show_picker(app: "TuiApp", title: str, options: list[tuple[str, str]]) -> str | None:
+    """Render a small choice picker overlay; return the chosen id (or None).
+
+    ``options`` is ``[(id, label), ...]``. Used for the codex auth flow's
+    Keep-or-Reauth confirm and the 3-option login-method picker.
+    """
+    import asyncio
+
+    from pythinker.cli.tui.pickers.fuzzy import FuzzyPickerScreen
+
+    fut: asyncio.Future[str | None] = asyncio.get_event_loop().create_future()
+
+    async def _on_select(item) -> None:
+        if not fut.done():
+            fut.set_result(item[0])
+
+    class _CancellablePicker(FuzzyPickerScreen):
+        def on_cancel(self) -> None:
+            if not fut.done():
+                fut.set_result(None)
+
+    screen: _CancellablePicker = _CancellablePicker(
+        options,
+        label_fn=lambda it: it[1],
+        on_select=_on_select,
+        title=title,
+    )
+    app.overlay.push(screen)
+    app.application.invalidate()
+    try:
+        return await fut
+    finally:
+        if app.overlay.top is screen:
+            app.overlay.pop()
+        app.application.invalidate()
 
 
 async def prompt_api_key(
@@ -157,19 +234,133 @@ async def save_api_key_and_reload(app: "TuiApp", spec, key: str) -> str | None:
     return None
 
 
-async def authenticate_provider(app: "TuiApp", spec) -> tuple[bool, str]:
-    """Run the right auth flow for ``spec`` and return ``(ok, detail)``.
+async def _switch_active_provider(app: "TuiApp", new_id: str) -> str | None:
+    """Set ``agents.defaults.provider`` to ``new_id``, rebuild + persist.
+
+    Mirrors the switch block in ``pickers/provider.py``. Returns ``None`` on
+    success or an error string on failure. Idempotent — caller can re-invoke
+    without ill effect.
+    """
+    from loguru import logger
+
+    from pythinker.cli.tui.pickers.provider import _default_model_for
+    from pythinker.config.loader import get_config_path, save_config
+    from pythinker.providers.factory import build_provider_snapshot
+
+    try:
+        new_config = app.config.model_copy(deep=True)
+        new_config.agents.defaults.provider = new_id
+        new_model = await _default_model_for(new_id, new_config)
+        if new_model:
+            new_config.agents.defaults.model = new_model
+        snapshot = build_provider_snapshot(new_config)
+        app.agent_loop._apply_provider_snapshot(snapshot)  # noqa: SLF001
+        app.config = new_config
+        if new_model:
+            app.state.model = new_model
+        app.state.provider = new_id
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("provider switch failed during auth flow")
+        return f"provider switch failed: {exc}"
+    try:
+        save_config(new_config, get_config_path())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("provider switch: persist failed: {}", exc)
+        return f"switched in-session, but persisting failed: {exc}"
+    return None
+
+
+async def _codex_login_flow(app: "TuiApp", spec) -> tuple[bool, str, str | None]:
+    """Run the OpenAI Codex login picker flow.
+
+    Returns ``(ok, detail, switched_to)``. When ``switched_to`` is non-None,
+    the active provider has already been fully switched (config mutated,
+    snapshot applied, persisted) and the caller must NOT redo the switch.
+    """
+    choice = await _show_picker(
+        app,
+        "OpenAI Codex login",
+        [
+            ("browser", "Browser login — ChatGPT Pro/Plus subscription"),
+            ("headless", "Headless login — no browser, paste callback URL (SSH-friendly)"),
+            ("api_key", "Paste API key — use OpenAI API directly (switches to OpenAI provider)"),
+        ],
+    )
+    if choice is None:
+        return False, "cancelled", None
+    if choice == "browser":
+        ok, detail = await run_oauth_login_in_terminal(spec, headless=False)
+        return ok, detail, None
+    if choice == "headless":
+        ok, detail = await run_oauth_login_in_terminal(spec, headless=True)
+        return ok, detail, None
+    if choice == "api_key":
+        from pythinker.providers.registry import PROVIDERS
+        openai_spec = next((s for s in PROVIDERS if s.name == "openai"), None)
+        if openai_spec is None:
+            return False, "openai provider missing from registry", None
+        key = await prompt_api_key(
+            app,
+            openai_spec.label,
+            getattr(openai_spec, "env_key", "OPENAI_API_KEY"),
+            getattr(openai_spec, "signup_url", ""),
+        )
+        if not key:
+            return False, "cancelled", None
+        err = await save_api_key_and_reload(app, openai_spec, key)
+        if err:
+            return False, err, None
+        switch_err = await _switch_active_provider(app, "openai")
+        if switch_err:
+            return False, switch_err, None
+        return True, "api key saved; switched to OpenAI", "openai"
+    return False, f"unknown auth method: {choice}", None
+
+
+async def authenticate_provider(
+    app: "TuiApp", spec
+) -> tuple[bool, str, str | None]:
+    """Run the right auth flow for ``spec``. Returns ``(ok, detail, switched_to)``.
+
+    ``switched_to`` is ``None`` for normal flows; when non-None, the auth
+    helper has already fully switched the active provider (e.g. the Codex
+    "paste API key" branch redirects to the ``openai`` provider) and the
+    caller must NOT redo the provider switch.
 
     Dispatch:
-      * OAuth providers → ``run_oauth_login_in_terminal``
+      * OAuth + saved token → Keep-or-Reauth confirm picker
+      * ``openai_codex`` reauth path → 3-option picker
+        (browser OAuth / headless OAuth / paste OpenAI API key)
+      * other OAuth providers → ``run_oauth_login_in_terminal``
       * api-key / gateway providers → masked prompt → save + hot-reload
-      * local / direct providers → no-op success (no creds to manage)
+      * local / direct providers → no-op success (no credentials to manage)
     """
     if getattr(spec, "is_oauth", False):
-        return await run_oauth_login_in_terminal(spec)
+        existing = _stored_oauth_token(spec)
+        if existing is not None:
+            account = getattr(existing, "account_id", None) or "(no account_id)"
+            choice = await _show_picker(
+                app,
+                f"{spec.label} — saved token found",
+                [
+                    ("keep", f"Keep saved token ({account})"),
+                    ("reauth", "Re-login (replace saved token)"),
+                ],
+            )
+            if choice is None:
+                return True, f"kept saved token ({account})", None
+            if choice == "keep":
+                return True, f"using saved token ({account})", None
+            # fall through to re-auth
+
+        if spec.name == "openai_codex":
+            return await _codex_login_flow(app, spec)
+
+        ok, detail = await run_oauth_login_in_terminal(spec)
+        return ok, detail, None
 
     if getattr(spec, "is_local", False) or getattr(spec, "is_direct", False):
-        return True, "local / direct — no credentials needed"
+        return True, "local / direct — no credentials needed", None
 
     key = await prompt_api_key(
         app,
@@ -178,8 +369,8 @@ async def authenticate_provider(app: "TuiApp", spec) -> tuple[bool, str]:
         getattr(spec, "signup_url", ""),
     )
     if not key:
-        return False, "cancelled"
+        return False, "cancelled", None
     err = await save_api_key_and_reload(app, spec, key)
     if err:
-        return False, err
-    return True, "api key saved"
+        return False, err, None
+    return True, "api key saved", None

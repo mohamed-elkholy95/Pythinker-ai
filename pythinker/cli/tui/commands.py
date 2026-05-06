@@ -257,12 +257,26 @@ async def _cmd_login(app: "TuiApp", args: list[str]) -> None:
         )
         return
 
-    ok, detail = await authenticate_provider(app, spec)
+    # ``switched_to`` is non-None when the helper has already performed the
+    # full provider switch itself (e.g. codex → openai via api-key); skip
+    # the duplicate switch block below in that case.
+    ok, detail, switched_to = await authenticate_provider(app, spec)
     if not ok:
         app.chat_pane.append_notice(
             f"{spec.label} authentication failed: {detail}",
             kind="warn" if detail == "cancelled" else "error",
         )
+        return
+
+    if switched_to is not None:
+        # Auth helper already persisted the active provider (e.g. codex →
+        # openai). Skip the switch block and just refresh the status bar.
+        app.chat_pane.append_notice(
+            f"✓ Re-authenticated with {spec.label} ({detail}). "
+            f"Active provider → {switched_to}",
+            kind="info",
+        )
+        app.status_bar.refresh()
         return
 
     # Switch the active provider/model so the next turn uses the new

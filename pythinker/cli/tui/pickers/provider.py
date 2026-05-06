@@ -168,7 +168,7 @@ async def open_provider_picker(app: "TuiApp", *, force_reauth: bool = False) -> 
 
             app.overlay.pop()
             app.application.invalidate()
-            ok, detail = await authenticate_provider(app, spec)
+            ok, detail, switched_to = await authenticate_provider(app, spec)
             if not ok:
                 # Cancelling re-auth on an already-ready provider is a
                 # benign "keep current config" — surface that, don't
@@ -185,6 +185,21 @@ async def open_provider_picker(app: "TuiApp", *, force_reauth: bool = False) -> 
                     f"{detail}. {hint}",
                     kind="warn" if detail == "cancelled" else "error",
                 )
+                return
+            if switched_to is not None:
+                # Auth helper already performed the full provider switch
+                # (codex → openai via api-key). Just surface the result and
+                # bail out — re-running the switch below would be a no-op
+                # at best and a double-persist at worst.
+                target_spec = next(
+                    (s for s in specs if s.name == switched_to), spec
+                )
+                app.chat_pane.append_notice(
+                    f"✓ Authenticated with {target_spec.display_name or switched_to} "
+                    f"({detail}). Active provider → {switched_to}",
+                    kind="info",
+                )
+                app.status_bar.refresh()
                 return
             # Re-check status now that creds are in place; refuse the
             # switch if the factory still rejects (e.g. wrong key shape).

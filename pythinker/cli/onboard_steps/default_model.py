@@ -87,20 +87,39 @@ def _step_default_model(ctx: _WizardContext) -> StepResult:
     if picked == back_key:
         return StepResult(status="back")
     if picked == keep_key:
+        _onboard._emit_docs_link("model")
         return StepResult(status="continue")
     if picked == manual_key:
         seed = current if keep_compatible else ""
         entered = clack.text("Model id:", default=seed)
         if entered.strip():
             ctx.draft.agents.defaults.model = entered.strip()
+        _onboard._emit_docs_link("model")
         return StepResult(status="continue")
 
     ctx.draft.agents.defaults.model = picked
+    _onboard._emit_docs_link("model")
     return StepResult(status="continue")
+
+
+_WORKSPACE_MARKERS = ("MEMORY.md", "SOUL.md", "USER.md", "history.jsonl", "skills")
+
+
+def _looks_like_pythinker_workspace(path: Path) -> bool:
+    """Return True if ``path`` already contains Pythinker artifacts.
+
+    Used to disambiguate between "fresh empty dir" and "user is reusing an
+    existing workspace" so the wizard doesn't silently drop them into a
+    populated dir without confirmation.
+    """
+    if not path.is_dir():
+        return False
+    return any((path / marker).exists() for marker in _WORKSPACE_MARKERS)
 
 
 def _step_workspace(ctx: _WizardContext) -> StepResult:
     """Step 11 — workspace directory: mkdir, verify writable, re-prompt on failure."""
+    from pythinker.cli import onboard as _onboard
     from pythinker.cli.onboard_views import clack
 
     default = (
@@ -115,12 +134,24 @@ def _step_workspace(ctx: _WizardContext) -> StepResult:
         else:
             entered = clack.text("Workspace directory:", default=default)
         path = Path(entered).expanduser()
+        already_populated = _looks_like_pythinker_workspace(path)
+        if already_populated and not ctx.non_interactive:
+            action = _onboard._prompt_configured_action(
+                f"Workspace {path}",
+                supports_disable=False,
+                update_text="Use this existing workspace",
+                skip_text="Pick a different directory",
+            )
+            if action == "skip":
+                continue
         try:
             path.mkdir(parents=True, exist_ok=True)
             probe = path / ".doctor-probe"
             probe.write_text("x")
             probe.unlink()
             ctx.draft.agents.defaults.workspace = str(path)
+            if not ctx.non_interactive:
+                _onboard._emit_docs_link("workspace")
             return StepResult(status="continue")
         except (PermissionError, OSError) as exc:
             if ctx.non_interactive:

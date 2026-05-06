@@ -17,4 +17,7 @@ def _step_security_disclaimer(ctx: _WizardContext) -> StepResult:
     )
     if not accepted:
         return StepResult(status="abort", message="security disclaimer not accepted")
+    if not ctx.non_interactive:
+        from pythinker.cli import onboard as _onboard
+        _onboard._emit_docs_link("security")
     return StepResult(status="continue")

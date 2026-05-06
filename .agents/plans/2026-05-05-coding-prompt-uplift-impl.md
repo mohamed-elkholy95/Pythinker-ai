@@ -104,11 +104,39 @@ line.
 
 ---
 
-## 2. Phase 2 — Subagent role split (deferred)
+## 2. Phase 2 — Subagent role split (shipped 2026-05-06)
 
-Defer to a separate approval after Phase 1 ships. Audit §4 Phase 2
-covers the design (`coder` / `explore` / `plan` roles, tool gating,
-`spawn.py` schema change). Not in this PR.
+**Goal.** Replace the single `subagent_system.md` with three role variants, each with a tailored prompt and a tool-allow-list.
+
+**Files.**
+
+- New: `pythinker/templates/agent/subagent_{coder,explore,plan}.md`.
+- Edit: `pythinker/templates/agent/subagent_system.md` — gains `{% include role_template %}` block at the bottom.
+- Edit: `pythinker/agent/subagent.py` — `spawn(...)` and `_run_subagent` accept `role`; the registry build is role-gated (explore/plan exclude `write_file` / `edit_file` / `exec`); skills_summary suppressed for non-coder roles; unknown roles fall back to `coder` in both gating and prompt rendering.
+- Edit: `pythinker/agent/tools/spawn.py` — `role` parameter added to the schema with enum `["coder","explore","plan"]`; description gains "thoroughness" / "when not to use" guidance.
+
+**Tool gating.**
+
+| Role | Registered tools |
+|---|---|
+| `coder` (default) | read/write/edit/list/glob/grep + exec + web (existing behavior) |
+| `explore` | read/list/glob/grep + web — no write_file, edit_file, exec |
+| `plan` | read/list/glob/grep + web — no write_file, edit_file, exec |
+
+**Skills.** `coder` keeps the full skill summary; `explore` and `plan` suppress it (skill prompts typically describe write/exec patterns that don't apply to read-only roles). Allowed-tools-aware skill filtering is a follow-up — for the conservative correct ship, blank summary wins.
+
+**Verification.**
+
+- `tests/agent/test_subagent_roles.py` — 10 cases covering tool gating, prompt rendering, unknown-role fallback, skills suppression.
+- Existing `tests/agent/test_subagent_listing.py` / `tests/runtime/test_subagent_egress_inheritance.py` / `tests/agent/tools/test_subagent_tools.py` still green (default coder behavior is byte-identical).
+
+**Acceptance gate.**
+
+- [x] Maintainer: approve Phase 2 (this PR's scope). _Approved + shipped 2026-05-06._
+- [x] Maintainer: confirm default `role="coder"` keeps current behavior unchanged. _Confirmed via existing tests; no LLM-call shape changes._
+- [x] Maintainer: confirm explore/plan really lack write/exec at registry-build time (not just at the prompt level). _Confirmed via `test_explore_role_drops_write_edit_shell` / `test_plan_role_drops_write_edit_shell`._
+
+Phase 2 status: **shipped** at `<this commit>`.
 
 ## 3. Phase 3 — Compaction prompt upgrade (deferred)
 
@@ -155,3 +183,4 @@ Phase 1 status: **shipped** at `d28808f`. Phases 2–5 still gated.
 |---|---|---|
 | 0 | 2026-05-05 | Initial cut from audit `2026-05-05-coding-prompt-uplift.md` §4 Phase 1. Phases 2–5 deferred to their own gates. |
 | Ratified | 2026-05-05 | Phase 1 approval gate ticked retroactively after the change shipped at `d28808f`. The implementation already covers all three checkbox claims (channel guard at `coding_directives.md:9`; token budget verified in audit §7). Phases 2–5 untouched. |
+| Phase 2 | 2026-05-06 | Phase 2 shipped: subagent role split (coder / explore / plan) with tool gating + role-specific prompts. Three new templates, ~30 LOC change in `subagent.py`, ~10 LOC schema change in `spawn.py`, 10 new tests. Approval gate ticked. Phases 3–5 still deferred. |

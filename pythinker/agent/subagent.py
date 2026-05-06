@@ -144,6 +144,7 @@ class SubagentManager:
         session_key: str | None = None,
         parent_context: "RequestContext | None" = None,
         parent_egress: "EgressGateway | None" = None,
+        role: str = "coder",
     ) -> str:
         """Spawn a subagent to execute a task in the background.
 
@@ -206,6 +207,7 @@ class SubagentManager:
                 task_id, task, display_label, origin, status,
                 parent_context=parent_context,
                 parent_egress=parent_egress,
+                role=role,
             )
         )
         self._running_tasks[task_id] = bg_task
@@ -235,6 +237,7 @@ class SubagentManager:
         *,
         parent_context: "RequestContext | None" = None,
         parent_egress: "EgressGateway | None" = None,
+        role: str = "coder",
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -244,17 +247,27 @@ class SubagentManager:
             status.iteration = payload.get("iteration", status.iteration)
 
         try:
-            # Build subagent tools (no message tool, no spawn tool)
+            # Build subagent tools (no message tool, no spawn tool).
+            # Role gating: explore/plan get read-only tools; coder keeps the
+            # full set (current behavior). Unknown role strings fall back to
+            # ``coder`` so a typo doesn't silently ship a no-op subagent —
+            # mirrors the same fallback in ``_build_subagent_prompt``. See
+            # `.agents/plans/2026-05-05-coding-prompt-uplift.md` §4 Phase 2.
+            effective_role = role if role in {"coder", "explore", "plan"} else "coder"
+            allow_writes = effective_role == "coder"
+            allow_exec = effective_role == "coder"
+
             tools = ToolRegistry()
             allowed_dir = self.workspace if (self.restrict_to_workspace or self.exec_config.sandbox) else None
             extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
             tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
-            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
+            if allow_writes:
+                tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
+                tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(GlobTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(GrepTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            if self.exec_config.enable:
+            if allow_exec and self.exec_config.enable:
                 tools.register(ExecTool(
                     working_dir=str(self.workspace),
                     timeout=self.exec_config.timeout,
@@ -266,7 +279,7 @@ class SubagentManager:
             if self.web_config.enable:
                 tools.register(WebSearchTool(config=self.web_config.search, proxy=self.web_config.proxy))
                 tools.register(WebFetchTool(proxy=self.web_config.proxy))
-            system_prompt = self._build_subagent_prompt()
+            system_prompt = self._build_subagent_prompt(role=effective_role)
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
@@ -424,21 +437,38 @@ class SubagentManager:
             lines.append(f"- {result.error}")
         return "\n".join(lines) or (result.error or "Error: subagent execution failed.")
 
-    def _build_subagent_prompt(self) -> str:
-        """Build a focused system prompt for the subagent."""
+    def _build_subagent_prompt(self, role: str = "coder") -> str:
+        """Build a focused system prompt for the subagent.
+
+        ``role`` selects which role-specific addendum to include after the
+        shared header (``coder`` / ``explore`` / ``plan`` per Phase 2 of
+        ``.agents/plans/2026-05-05-coding-prompt-uplift.md``). Unknown roles
+        fall through to ``coder`` so callers can't silently ship a
+        no-op-prompt subagent.
+
+        Skills are surfaced only to the ``coder`` role: explore / plan are
+        read-only and skill content typically guides write/exec patterns.
+        """
         from pythinker.agent.context import ContextBuilder
         from pythinker.agent.skills import SkillsLoader
 
         time_ctx = ContextBuilder._build_runtime_context(None, None)
-        skills_summary = SkillsLoader(
-            self.workspace,
-            disabled_skills=self.disabled_skills,
-        ).build_skills_summary()
+        if role not in {"coder", "explore", "plan"}:
+            role = "coder"
+        if role == "coder":
+            skills_summary = SkillsLoader(
+                self.workspace,
+                disabled_skills=self.disabled_skills,
+            ).build_skills_summary()
+        else:
+            skills_summary = ""
+        role_template = f"agent/subagent_{role}.md"
         return render_template(
             "agent/subagent_system.md",
             time_ctx=time_ctx,
             workspace=str(self.workspace),
             skills_summary=skills_summary or "",
+            role_template=role_template,
         )
 
     async def cancel_task(self, task_id: str) -> bool:

@@ -17,3 +17,7 @@ Read SKILL.md with read_file to use a skill.
 
 {{ skills_summary }}
 {% endif %}
+{% if role_template %}
+
+{% include role_template %}
+{% endif %}

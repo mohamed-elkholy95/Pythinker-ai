@@ -16,6 +16,16 @@ if TYPE_CHECKING:
     tool_parameters_schema(
         task=StringSchema("The task for the subagent to complete"),
         label=StringSchema("Optional short label for the task (for display)"),
+        role=StringSchema(
+            "Subagent role: 'coder' (default — full read/write/edit/exec set), "
+            "'explore' (read-only: glob/grep/read_file/list_dir + web; "
+            "for context-gathering), 'plan' (read-only: same tools; for "
+            "design/strategy work; outputs known/unknown/plan sections). "
+            "Pick 'explore' or 'plan' when the task is purely about "
+            "understanding or designing — they don't need write/exec and "
+            "the role-specific prompt yields tighter, more focused output.",
+            enum=["coder", "explore", "plan"],
+        ),
         required=["task"],
     )
 )
@@ -58,12 +68,24 @@ class SpawnTool(Tool):
             "Spawn a subagent to handle a task in the background. "
             "Use this for complex or time-consuming tasks that can run independently. "
             "The subagent will complete the task and report back when done. "
+            "Pass role='explore' for read-only context-gathering ('quick' / "
+            "'medium' / 'thorough' depths in the task prompt), role='plan' "
+            "for design / strategy work that should output known/unknown/plan "
+            "sections, or omit role for the default coder behavior with full "
+            "read/write/edit/exec tools. "
             "For deliverables or existing projects, inspect the workspace first "
             "and use a dedicated subdirectory when helpful."
         )
 
-    async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str | None:
+    async def execute(
+        self,
+        task: str,
+        label: str | None = None,
+        role: str | None = None,
+        **kwargs: Any,
+    ) -> str | None:
         """Spawn a subagent to execute the given task."""
+        chosen_role = role if role in {"coder", "explore", "plan"} else "coder"
         return await self._manager.spawn(
             task=task,
             label=label,
@@ -72,4 +94,5 @@ class SpawnTool(Tool):
             session_key=self._session_key.get(),
             parent_context=self._parent_context.get(),
             parent_egress=self._parent_egress.get(),
+            role=chosen_role,
         )

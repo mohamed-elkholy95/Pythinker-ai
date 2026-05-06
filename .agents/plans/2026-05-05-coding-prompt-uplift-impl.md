@@ -138,10 +138,34 @@ line.
 
 Phase 2 status: **shipped** at `<this commit>`.
 
-## 3. Phase 3 — Compaction prompt upgrade (deferred)
+## 3. Phase 3 — Compaction prompt upgrade (shipped 2026-05-06)
 
-Defer. Audit §4 Phase 3 covers the design (consolidator template
-becomes structured tags). Not in this PR.
+**Goal.** Replace the 13-line bullet-extractor with a structured prompt that retains code-state, error/solution pairs, and the current task — so long sessions survive compaction without losing working file context.
+
+**Files.**
+
+- Edit only: `pythinker/templates/agent/consolidator_archive.md` — rewrite as a ~50-line prompt with priorities, compression rules, and six flat section tags (`<current_focus>` / `<active_issues>` / `<code_state>` / `<completed_tasks>` / `<environment>` / `<important_context>`).
+- No code changes. `Consolidator.archive` already passes whatever the template produces to the LLM and stores the response.
+
+**Caveats baked into the template.**
+
+- Tags are flat — no nested `<file>` blocks. They render better in `MEMORY.md` when reloaded as bootstrap content.
+- Tags exist for the LLM writing the section, not for downstream parsing — `MemoryStore` does not re-parse them.
+- Skip a section entirely if empty; do not emit `(none)` placeholders.
+- 5-line snippet cap; secrets always masked with `***` even in error messages.
+
+**Verification.**
+
+- `tests/agent/test_consolidator.py` — 2 new cases (advertises six section tags, keeps core compression directives). 10 total green.
+- Existing 8 consolidator-flow tests still pass — the template change is invisible to the LLM-call shape.
+
+**Acceptance gate.**
+
+- [x] Maintainer: approve Phase 3 scope (template-only). _Approved + shipped 2026-05-06._
+- [x] Maintainer: confirm zero code changes (Consolidator behavior unchanged). _Confirmed; only `consolidator_archive.md` modified._
+- [x] Maintainer: confirm tags are flat per the §4 caveat. _Confirmed; no `<file>` nesting in template._
+
+Phase 3 status: **shipped** at `<this commit>`.
 
 ## 4. Phase 4 — `/init` AGENTS.md generator (deferred)
 
@@ -184,3 +208,4 @@ Phase 1 status: **shipped** at `d28808f`. Phases 2–5 still gated.
 | 0 | 2026-05-05 | Initial cut from audit `2026-05-05-coding-prompt-uplift.md` §4 Phase 1. Phases 2–5 deferred to their own gates. |
 | Ratified | 2026-05-05 | Phase 1 approval gate ticked retroactively after the change shipped at `d28808f`. The implementation already covers all three checkbox claims (channel guard at `coding_directives.md:9`; token budget verified in audit §7). Phases 2–5 untouched. |
 | Phase 2 | 2026-05-06 | Phase 2 shipped: subagent role split (coder / explore / plan) with tool gating + role-specific prompts. Three new templates, ~30 LOC change in `subagent.py`, ~10 LOC schema change in `spawn.py`, 10 new tests. Approval gate ticked. Phases 3–5 still deferred. |
+| Phase 3 | 2026-05-06 | Phase 3 shipped: structured compaction prompt (six flat section tags). Template-only change to `consolidator_archive.md`; 0 LOC of code change. 2 new prompt-shape tests; existing 8 consolidator tests still green. Approval gate ticked. Phases 4–5 still deferred. |

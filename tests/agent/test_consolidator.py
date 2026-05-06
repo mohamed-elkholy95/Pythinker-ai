@@ -5,6 +5,33 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from pythinker.agent.memory import Consolidator, MemoryStore
+from pythinker.utils.prompt_templates import render_template
+
+
+class TestConsolidatorPromptShape:
+    """Phase 3 (coding-prompt uplift): the rendered prompt advertises the
+    six structured section tags that downstream MEMORY.md ingestion
+    relies on for scan-friendliness."""
+
+    def test_consolidator_prompt_advertises_structured_tags(self):
+        rendered = render_template("agent/consolidator_archive.md", strip=True)
+        for tag in (
+            "<current_focus>",
+            "<active_issues>",
+            "<code_state>",
+            "<completed_tasks>",
+            "<environment>",
+            "<important_context>",
+        ):
+            assert tag in rendered, f"missing section tag: {tag}"
+
+    def test_consolidator_prompt_keeps_core_compression_directives(self):
+        """Compression rules must survive: secrets-mask, 5-line snippet cap,
+        flat (no nested) tags. Drift here = tokens leaking."""
+        rendered = render_template("agent/consolidator_archive.md", strip=True)
+        assert "Mask secrets" in rendered
+        assert "5 lines" in rendered
+        assert "flat" in rendered.lower()
 
 
 @pytest.fixture

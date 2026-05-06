@@ -42,6 +42,181 @@
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
+## `pythinker onboard`
+
+Walk a fresh user from zero to a saved `~/.pythinker/config.json` via
+the linear wizard. Asks about provider + auth, default model, workspace,
+gateway, and channels; renders a pre-save diff and (optionally) starts
+the gateway and opens the WebUI.
+
+```
+pythinker onboard [--workspace DIR] [--config PATH] [--non-interactive]
+                  [--flow quickstart|manual] [--auth PROVIDER]
+                  [--auth-method ID] [--yes-security] [--start-gateway]
+                  [--skip-gateway] [--open-webui] [--reset SCOPE]
+                  [--print-required-flags]
+```
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--workspace`, `-w` | from config | Override `agents.defaults.workspace` for this run. |
+| `--config`, `-c` | `~/.pythinker/config.json` | Config file to write. |
+| `--non-interactive` | off | Run with no prompts; uses defaults + flags. Exits non-zero on missing precondition. |
+| `--flow` | unset | `quickstart` (minimal prompts, sensible defaults) or `manual` (full picker). |
+| `--auth` | unset | Provider name (e.g. `openai_codex`) or `skip`. |
+| `--auth-method` | first in spec | Auth method id for the chosen provider. |
+| `--yes-security` | off | Pre-accept the security disclaimer. |
+| `--start-gateway` / `--skip-gateway` | wizard asks | Force start / skip the gateway after save. |
+| `--open-webui` | off | Open WebUI in the default browser once the gateway is up. |
+| `--reset` | unset | One of `config | credentials | sessions | full` — wipe before onboarding. |
+| `--print-required-flags` | off | Print the exact `--flag` set required for a zero-prompt run given current config; exits 0. |
+
+Interactive runs render a pre-save diff (green added / yellow changed
+/ red removed) before asking Save? / Discard?, with secret-bearing
+fields auto-redacted. Post-save runs a green/yellow/red health check
+(workspace writable, gateway port free, OAuth token validity).
+
+## `pythinker agent`
+
+One-shot or interactive REPL chat against the configured agent loop.
+Bypasses the gateway and runs the agent in-process.
+
+```
+pythinker agent [--message TEXT] [--session KEY] [--workspace DIR]
+                [--config PATH] [--markdown/--no-markdown]
+                [--logs/--no-logs]
+```
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--message`, `-m` | unset | Send a single message and exit. Without it, drops into a REPL. |
+| `--session`, `-s` | `cli:direct` | Session id (`channel:chat_id` shape). |
+| `--workspace`, `-w` | from config | Workspace root for memory + tools. |
+| `--config`, `-c` | `~/.pythinker/config.json` | Config file. |
+| `--markdown` / `--no-markdown` | `--markdown` | Render assistant output as Markdown vs plain text. |
+| `--logs` / `--no-logs` | `--no-logs` | Show pythinker runtime logs (`INFO`+) inline during chat. |
+
+REPL exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`. For a
+full-screen interface use `pythinker tui` instead.
+
+## `pythinker serve`
+
+Start the OpenAI-compatible HTTP server (`/v1/chat/completions`).
+
+```
+pythinker serve [--port PORT] [--host HOST] [--timeout SECONDS]
+                [--verbose] [--quiet] [--workspace DIR] [--config PATH]
+```
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--port`, `-p` | `api.port` (8900) | Bind port. |
+| `--host`, `-H` | `api.host` (`127.0.0.1`) | Bind address. Loopback by default. |
+| `--timeout`, `-t` | `api.timeout_s` | Per-request timeout in seconds. |
+| `--verbose`, `-v` | off | DEBUG-level logs. |
+| `--quiet`, `-q` | off | WARNING-level logs. |
+| `--workspace`, `-w` | from config | Override workspace root. |
+| `--config`, `-c` | `~/.pythinker/config.json` | Config file. |
+
+Pre-flight refuses to start if the port is already bound. The server
+reuses the same `AgentLoop` machinery as `pythinker gateway` and
+`pythinker agent`; the only difference is the wire protocol.
+
+## `pythinker gateway`
+
+Start the multi-channel gateway + WebSocket server. This is the
+process every chat platform connects to.
+
+```
+pythinker gateway [--port PORT] [--workspace DIR] [--verbose]
+                  [--quiet] [--config PATH]
+```
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--port`, `-p` | `gateway.port` (18790) | Bind port. |
+| `--workspace`, `-w` | from config | Override workspace root. |
+| `--verbose`, `-v` | off | DEBUG-level logs. |
+| `--quiet`, `-q` | off | WARNING-level logs. |
+| `--config`, `-c` | `~/.pythinker/config.json` | Config file. |
+
+Pre-flight refuses to start if the port is already bound. The gateway
+serves the WebUI from `pythinker/web/dist`, exposes the WebSocket
+multiplex protocol, and bridges every enabled channel into the shared
+agent loop. Use `pythinker restart gateway` to bounce a running
+instance without losing the port.
+
+## `pythinker status`
+
+Print a one-shot summary: config path, default provider/model,
+workspace, enabled channels, gateway and API ports, and whether OAuth
+tokens are present. Lower-detail than `pythinker doctor` — does not
+perform connectivity checks.
+
+```
+pythinker status
+```
+
+Takes no flags. Always exits 0; intended for "did my last config edit
+land?" sanity checks at the host shell.
+
+## `pythinker channels`
+
+Per-channel inspection and login. The sub-app has three commands.
+
+```
+pythinker channels status [--config PATH]
+pythinker channels list   [--config PATH]
+pythinker channels login  <channel-name> [--force] [--config PATH]
+```
+
+| Subcommand | Purpose |
+|---|---|
+| `status` | Tabular `name + enabled` view from the registry; respects only the channels currently registered (built-in + plugins). |
+| `list` | Tabular `name + enabled + configured` view. `enabled` = the channel's section is enabled in config; `configured` = the section has the minimum credentials/IDs to run. |
+| `login` | Authenticate a channel that has an interactive login (e.g. WhatsApp QR pairing). `--force` re-runs the login even if tokens already exist. |
+
+`status` is the registry view (what code knows how to load); `list`
+adds the config view (what's actually wired up). Use both when
+debugging "I enabled it but it's not running."
+
+## `pythinker plugins`
+
+Show every channel adapter the runtime can discover, marking which
+ones are built-in vs installed via the `pythinker.channels` entry
+point.
+
+```
+pythinker plugins list
+```
+
+Takes no flags. Plugin channels are loaded by Python's entry-point
+machinery, so a freshly `pip install`'d third-party channel package
+shows up here without any config changes — but it still has to be
+enabled in `~/.pythinker/config.json` before it actually runs.
+
+## `pythinker provider`
+
+OAuth login for providers that don't use a static API key. Currently
+`openai-codex` (ChatGPT Pro/Plus subscription) and `github-copilot`.
+
+```
+pythinker provider login <provider-name>
+```
+
+| Subcommand | Purpose |
+|---|---|
+| `login openai-codex` | Run the `oauth_cli_kit` device flow → store the token under `~/.local/share/oauth-cli-kit/auth/oauth.json`. |
+| `login github-copilot` | Run the GitHub device flow → exchange for a Copilot session token, stored under `~/.local/share/pythinker/auth/github-copilot.json`. |
+
+Both flows print a URL the user opens in a browser; the callback
+listener auto-completes the exchange. In SSH/headless environments,
+the wizard prompts for paste of the redirect URL — bare codes are
+refused (CSRF state must be present).
+
+To delete a stored token without re-running login, use
+`pythinker auth logout <provider-name>`.
+
 ## `pythinker tui` (alias `pythinker chat`)
 
 Open the full-screen TUI chat against the configured agent loop.

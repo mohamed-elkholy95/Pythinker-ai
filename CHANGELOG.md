@@ -6,8 +6,35 @@ All notable user-visible changes to Pythinker land here. The project follows
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-05-06
+
 ### Added
 
+- **Multi-agent workspace layout.** New `pythinker agents` subcommand
+  plus a wizard-driven onboarding flow lay out per-agent configs under
+  `~/.pythinker/agents/<name>/` with isolated workspace, history, and
+  memory. Per-agent config-path resolution (`pythinker --agent <name>
+  ...`) lets one host run several independent agents side by side.
+- **`/init` slash command.** Generate a tuned `AGENTS.md` for the
+  current workspace from a template, populating provider, channel, and
+  tool defaults so a fresh agent has sensible operating ground rules
+  on first run.
+- **Dynamic prompt injection.** Runner now ships a dynamic-injection
+  scaffold with `plan` and `afk` providers that compose just-in-time
+  context into the system prompt — laying groundwork for richer
+  context-aware steering without permanent prompt bloat.
+- **Subagent role split.** Subagents now ship in three flavours —
+  `coder` (full tool set), `explore` (read-only navigation), and
+  `plan` (planning-only, no write/edit/shell) — selectable from the
+  spawn call. Default remains `coder` for backwards compatibility.
+- **Structured compaction prompt.** History consolidation now runs a
+  structured prompt that yields tighter, role-aware summaries with
+  predictable section ordering (status / decisions / open threads).
+- **Coding-directives prompt block.** Root system prompt now includes
+  a coding-directives block reinforcing surgical edits, verification
+  before completion, and explicit assumption-surfacing. Lifts the
+  baseline behaviour of the agent on engineering tasks without
+  per-tool prompt rewrites.
 - **Autonomous task spine.** Subagents are now tracked as first-class
   task records with durable per-task output files under
   `.pythinker/task-results/`. Three new chat commands let you observe
@@ -43,6 +70,25 @@ All notable user-visible changes to Pythinker land here. The project follows
   answers, so this header alone defeats drive-by writes for the
   localhost-only deployment posture Pythinker targets. See
   `docs/security.md` for the full rationale.
+
+### Fixed
+
+- **TUI slash menu Down arrow moves in one press.** The completion
+  popup paints row 0 as highlighted via a render-time index lie
+  (`HighlightFirstCompletionsMenu`); prompt_toolkit's default Down
+  handler then transitioned `complete_index` from `None → 0`,
+  producing no visible change. Custom Down/Up bindings now treat the
+  visual state as the source of truth and cycle modulo the completion
+  count, so the first arrow press visibly moves to the second option.
+  Enter applies the completion at the highlighted index.
+
+### Internal
+
+- **Large refactor pass.** Split `loop.py`, `runner.py`,
+  `commands.py`, `memory.py`, `websocket.py`, `telegram.py`, the
+  filesystem-tool guards, and the onboarding driver into focused
+  packages with thinner top-level files. No public-API change — all
+  existing imports continue to work via re-exports.
 
 ## [2.1.1] - 2026-05-03
 

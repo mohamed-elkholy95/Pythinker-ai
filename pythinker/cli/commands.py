@@ -141,6 +141,12 @@ app.add_typer(backup_app, name="backup")
 cleanup_app = typer.Typer(help="Plan / run destructive cleanups.", no_args_is_help=True)
 app.add_typer(cleanup_app, name="cleanup")
 
+# Multi-agent management (~/.pythinker/agents/<id>/). See
+# .agents/plans/2026-05-05-onboard-phase-2-multi-agent.md.
+from pythinker.cli.agents import app as agents_app  # noqa: E402
+
+app.add_typer(agents_app, name="agents")
+
 # Release-readiness checks (PEP 440 version, __init__ fallback equality,
 # CHANGELOG section, optional git-tag/build/twine-check). Same orchestrator
 # is imported by .github/workflows/publish.yml so CI and a maintainer's

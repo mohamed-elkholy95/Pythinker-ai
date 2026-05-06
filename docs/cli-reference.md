@@ -217,6 +217,34 @@ refused (CSRF state must be present).
 To delete a stored token without re-running login, use
 `pythinker auth logout <provider-name>`.
 
+## `pythinker agents`
+
+Manage the multi-agent layout under `~/.pythinker/agents/<id>/`. A
+single-config install (`~/.pythinker/config.json` only) keeps working
+unchanged — these subcommands are opt-in.
+
+```
+pythinker agents list
+pythinker agents create <id> [--from <other-id>]
+pythinker agents switch <id>
+pythinker agents delete <id> --confirm <id>
+```
+
+| Subcommand | Purpose |
+|---|---|
+| `list` | Tabular `active + id + config-path + default-model` view. Falls back to a single `default (legacy)` row when no per-agent dir exists. |
+| `create <id>` | Scaffold `~/.pythinker/agents/<id>/{config.json, workspace/}`. `--from <other>` copies the source agent's `config.json` plus its `MEMORY.md` / `SOUL.md` / `USER.md` if present. Refuses to overwrite. |
+| `switch <id>` | Write `~/.pythinker/current-agent` so subsequent invocations resolve to that agent's config. Refuses ids that don't have a config (except `default`, which is special-cased to mean "use the legacy single-config path"). |
+| `delete <id> --confirm <id>` | Remove the agent dir. Refuses to delete `default`, refuses to delete the currently-active agent, and requires `--confirm <id>` to match the id being deleted. |
+
+Active-agent resolution order (when no `--config` override is in
+effect): `$PYTHINKER_AGENT_ID` env var → `~/.pythinker/current-agent`
+file → the literal `default`. If the resolved per-agent dir doesn't
+exist, the loader falls back to `~/.pythinker/config.json`.
+
+OAuth tokens stay shared at `~/.local/share/oauth-cli-kit/auth/` and
+`~/.local/share/pythinker/auth/` regardless of the active agent.
+
 ## `pythinker tui` (alias `pythinker chat`)
 
 Open the full-screen TUI chat against the configured agent loop.

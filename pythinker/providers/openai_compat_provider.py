@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import importlib.util
-import json
 import os
 import secrets
 import string
-import time
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
@@ -27,21 +24,35 @@ else:
         )
     from openai import AsyncOpenAI
 
+from pythinker.providers._message_sanitize import (
+    ALLOWED_MSG_KEYS,
+    normalize_tool_call_arguments,
+    normalize_tool_call_id,
+    sanitize_openai_messages,
+)
 from pythinker.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from pythinker.providers.openai_responses import (
-    consume_sdk_stream,
-    convert_messages,
-    convert_tools,
-    parse_response_output,
+    _RESPONSES_FAILURE_THRESHOLD as _RESPONSES_FAILURE_THRESHOLD,
+)
+from pythinker.providers.openai_responses import (
+    _RESPONSES_PROBE_INTERVAL_S as _RESPONSES_PROBE_INTERVAL_S,
+)
+from pythinker.providers.openai_responses import (
+    build_responses_body,
+    circuit_allows_request,
+    create_response,
+    is_direct_openai_base,
+    record_responses_failure,
+    record_responses_success,
+    responses_circuit_key,
+    should_fallback_from_responses_error,
+    stream_response,
 )
 
 if TYPE_CHECKING:
     from pythinker.providers.registry import ProviderSpec
 
-_ALLOWED_MSG_KEYS = frozenset({
-    "role", "content", "tool_calls", "tool_call_id", "name",
-    "reasoning_content", "extra_content",
-})
+_ALLOWED_MSG_KEYS = ALLOWED_MSG_KEYS
 _ALNUM = string.ascii_letters + string.digits
 
 _STANDARD_TC_KEYS = frozenset({"id", "type", "index", "function"})
@@ -145,26 +156,8 @@ def _uses_openrouter_attribution(spec: "ProviderSpec | None", api_base: str | No
     return bool(api_base and "openrouter" in api_base.lower())
 
 
-_RESPONSES_FAILURE_THRESHOLD = 3
-_RESPONSES_PROBE_INTERVAL_S = 300  # 5 minutes
-
-
-def _is_direct_openai_base(api_base: str | None) -> bool:
-    """Return True for direct OpenAI endpoints, not generic OpenAI-compatible gateways."""
-    if not api_base:
-        return True
-    normalized = api_base.strip().lower().rstrip("/")
-    return "api.openai.com" in normalized and "openrouter" not in normalized
-
-
-def _responses_circuit_key(
-    model: str | None,
-    default_model: str,
-    reasoning_effort: str | None,
-) -> str:
-    model_name = (model or default_model).lower()
-    effort = reasoning_effort.lower() if isinstance(reasoning_effort, str) else ""
-    return f"{model_name}:{effort}"
+_responses_circuit_key = responses_circuit_key
+_is_direct_openai_base = is_direct_openai_base
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -281,69 +274,17 @@ class OpenAICompatProvider(LLMProvider):
 
     @staticmethod
     def _normalize_tool_call_id(tool_call_id: Any) -> Any:
-        """Normalize to a provider-safe 9-char alphanumeric form."""
-        if not isinstance(tool_call_id, str):
-            return tool_call_id
-        if len(tool_call_id) == 9 and tool_call_id.isalnum():
-            return tool_call_id
-        return hashlib.sha1(tool_call_id.encode()).hexdigest()[:9]
+        return normalize_tool_call_id(tool_call_id)
 
     @staticmethod
     def _normalize_tool_call_arguments(arguments: Any) -> str:
-        """Force function.arguments into a valid JSON object string."""
-        if isinstance(arguments, str):
-            stripped = arguments.strip()
-            if not stripped:
-                return "{}"
-            try:
-                parsed = json_repair.loads(stripped)
-            except Exception:
-                return "{}"
-            if isinstance(parsed, dict):
-                return json.dumps(parsed, ensure_ascii=False)
-            return "{}"
-        if isinstance(arguments, dict):
-            return json.dumps(arguments, ensure_ascii=False)
-        return "{}"
+        return normalize_tool_call_arguments(arguments)
 
     def _sanitize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Strip non-standard keys, normalize tool_call IDs."""
-        sanitized = LLMProvider._sanitize_request_messages(messages, _ALLOWED_MSG_KEYS)
-        id_map: dict[str, str] = {}
-
-        def map_id(value: Any) -> Any:
-            if not isinstance(value, str):
-                return value
-            return id_map.setdefault(value, self._normalize_tool_call_id(value))
-
-        for clean in sanitized:
-            if isinstance(clean.get("tool_calls"), list):
-                normalized = []
-                for tc in clean["tool_calls"]:
-                    if not isinstance(tc, dict):
-                        normalized.append(tc)
-                        continue
-                    tc_clean = dict(tc)
-                    tc_clean["id"] = map_id(tc_clean.get("id"))
-                    function = tc_clean.get("function")
-                    if isinstance(function, dict):
-                        function_clean = dict(function)
-                        if "arguments" in function_clean:
-                            function_clean["arguments"] = self._normalize_tool_call_arguments(
-                                function_clean.get("arguments")
-                            )
-                        else:
-                            function_clean["arguments"] = "{}"
-                        tc_clean["function"] = function_clean
-                    normalized.append(tc_clean)
-                clean["tool_calls"] = normalized
-                if clean.get("role") == "assistant":
-                    # Some OpenAI-compatible gateways reject assistant messages
-                    # that mix non-empty content with tool_calls.
-                    clean["content"] = None
-            if "tool_call_id" in clean and clean["tool_call_id"]:
-                clean["tool_call_id"] = map_id(clean["tool_call_id"])
-        return self._enforce_role_alternation(sanitized)
+        return sanitize_openai_messages(
+            messages,
+            enforce_role_alternation=self._enforce_role_alternation,
+        )
 
     # ------------------------------------------------------------------
     # Build kwargs
@@ -478,7 +419,7 @@ class OpenAICompatProvider(LLMProvider):
         if self._spec and self._spec.name not in ("openai", "github_copilot"):
             return False
         if self._spec is None or self._spec.name != "github_copilot":
-            if not _is_direct_openai_base(self._effective_base):
+            if not is_direct_openai_base(self._effective_base):
                 return False
 
         model_name = (model or self.default_model).lower()
@@ -491,59 +432,32 @@ class OpenAICompatProvider(LLMProvider):
             return False
 
         # Circuit breaker: skip after repeated failures, probe periodically.
-        key = _responses_circuit_key(model, self.default_model, reasoning_effort)
-        failures = self._responses_failures.get(key, 0)
-        if failures >= _RESPONSES_FAILURE_THRESHOLD:
-            tripped = self._responses_tripped_at.get(key, 0.0)
-            if (time.monotonic() - tripped) < _RESPONSES_PROBE_INTERVAL_S:
-                return False
-            # Half-open: allow one probe attempt
-        return True
+        key = responses_circuit_key(model, self.default_model, reasoning_effort)
+        return circuit_allows_request(
+            self._responses_failures,
+            self._responses_tripped_at,
+            key=key,
+        )
 
     def _record_responses_failure(self, model: str | None, reasoning_effort: str | None) -> None:
-        key = _responses_circuit_key(model, self.default_model, reasoning_effort)
-        count = self._responses_failures.get(key, 0) + 1
-        self._responses_failures[key] = count
-        if count >= _RESPONSES_FAILURE_THRESHOLD:
-            self._responses_tripped_at[key] = time.monotonic()
-            logger.warning(
-                "Responses API circuit open for {} — falling back to Chat Completions",
-                key,
-            )
+        key = responses_circuit_key(model, self.default_model, reasoning_effort)
+        record_responses_failure(
+            self._responses_failures,
+            self._responses_tripped_at,
+            key=key,
+        )
 
     def _record_responses_success(self, model: str | None, reasoning_effort: str | None) -> None:
-        key = _responses_circuit_key(model, self.default_model, reasoning_effort)
-        self._responses_failures.pop(key, None)
-        self._responses_tripped_at.pop(key, None)
+        key = responses_circuit_key(model, self.default_model, reasoning_effort)
+        record_responses_success(
+            self._responses_failures,
+            self._responses_tripped_at,
+            key=key,
+        )
 
     @staticmethod
     def _should_fallback_from_responses_error(e: Exception) -> bool:
-        """Fallback only for likely Responses API compatibility errors."""
-        response = getattr(e, "response", None)
-        status_code = getattr(e, "status_code", None)
-        if status_code is None and response is not None:
-            status_code = getattr(response, "status_code", None)
-        if status_code not in {400, 404, 422}:
-            return False
-
-        body = (
-            getattr(e, "body", None)
-            or getattr(e, "doc", None)
-            or getattr(response, "text", None)
-        )
-        body_text = str(body).lower() if body is not None else ""
-        compatibility_markers = (
-            "responses",
-            "response api",
-            "max_output_tokens",
-            "instructions",
-            "previous_response",
-            "unsupported",
-            "not supported",
-            "unknown parameter",
-            "unrecognized request argument",
-        )
-        return any(marker in body_text for marker in compatibility_markers)
+        return should_fallback_from_responses_error(e)
 
     def _build_responses_body(
         self,
@@ -560,29 +474,16 @@ class OpenAICompatProvider(LLMProvider):
         if self._spec and self._spec.strip_model_prefix:
             model_name = model_name.split("/")[-1]
         sanitized_messages = self._sanitize_messages(self._sanitize_empty_content(messages))
-        instructions, input_items = convert_messages(sanitized_messages)
-
-        body: dict[str, Any] = {
-            "model": model_name,
-            "instructions": instructions or None,
-            "input": input_items,
-            "max_output_tokens": max(1, max_tokens),
-            "store": False,
-            "stream": False,
-        }
-
-        if self._supports_temperature(model_name, reasoning_effort):
-            body["temperature"] = temperature
-
-        if reasoning_effort and reasoning_effort.lower() != "none":
-            body["reasoning"] = {"effort": reasoning_effort}
-            body["include"] = ["reasoning.encrypted_content"]
-
-        if tools:
-            body["tools"] = convert_tools(tools)
-            body["tool_choice"] = tool_choice or "auto"
-
-        return body
+        return build_responses_body(
+            messages=sanitized_messages,
+            tools=tools,
+            model_name=model_name,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+            tool_choice=tool_choice,
+            supports_temperature=self._supports_temperature(model_name, reasoning_effort),
+        )
 
     # ------------------------------------------------------------------
     # Response parsing
@@ -1015,7 +916,7 @@ class OpenAICompatProvider(LLMProvider):
                         messages, tools, model, max_tokens, temperature,
                         reasoning_effort, tool_choice,
                     )
-                    result = parse_response_output(await self._client.responses.create(**body))
+                    result = await create_response(self._client, body)
                     self._record_responses_success(model, reasoning_effort)
                     return result
                 except Exception as responses_error:
@@ -1055,32 +956,14 @@ class OpenAICompatProvider(LLMProvider):
                         messages, tools, model, max_tokens, temperature,
                         reasoning_effort, tool_choice,
                     )
-                    body["stream"] = True
-                    stream = await self._client.responses.create(**body)
-
-                    async def _timed_stream():
-                        stream_iter = stream.__aiter__()
-                        while True:
-                            try:
-                                yield await asyncio.wait_for(
-                                    stream_iter.__anext__(),
-                                    timeout=idle_timeout_s,
-                                )
-                            except StopAsyncIteration:
-                                break
-
-                    content, tool_calls, finish_reason, usage, reasoning_content = await consume_sdk_stream(
-                        _timed_stream(),
-                        on_content_delta,
+                    result = await stream_response(
+                        self._client,
+                        body,
+                        idle_timeout_s=idle_timeout_s,
+                        on_content_delta=on_content_delta,
                     )
                     self._record_responses_success(model, reasoning_effort)
-                    return LLMResponse(
-                        content=content or None,
-                        tool_calls=tool_calls,
-                        finish_reason=finish_reason,
-                        usage=usage,
-                        reasoning_content=reasoning_content,
-                    )
+                    return result
                 except Exception as responses_error:
                     if self._spec and self._spec.name == "github_copilot":
                         # Copilot gateway exposes GPT-5/o-series only via /responses;

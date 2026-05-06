@@ -8,6 +8,7 @@
   <p>
     <a href="https://pypi.org/project/pythinker-ai/"><img src="https://img.shields.io/pypi/v/pythinker-ai?cacheSeconds=300" alt="PyPI"></a>
     <a href="https://pepy.tech/projects/pythinker-ai"><img src="https://img.shields.io/pepy/dt/pythinker-ai?label=downloads&color=%2312b76a&cacheSeconds=600" alt="Downloads"></a>
+    <a href="https://pypistats.org/packages/pythinker-ai"><img src="https://img.shields.io/pypi/dm/pythinker-ai?label=downloads%2Fmonth&color=%23228be6&cacheSeconds=600" alt="Downloads/month"></a>
     <img src="https://img.shields.io/badge/python-%E2%89%A53.11-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
     <img src="https://visitor-badge.laobi.icu/badge?page_id=mohamed-elkholy95.Pythinker-ai" alt="Visitors">

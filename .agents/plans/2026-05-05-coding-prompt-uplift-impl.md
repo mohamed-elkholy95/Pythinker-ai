@@ -167,10 +167,30 @@ Phase 2 status: **shipped** at `<this commit>`.
 
 Phase 3 status: **shipped** at `<this commit>`.
 
-## 4. Phase 4 — `/init` AGENTS.md generator (deferred)
+## 4. Phase 4 — `/init` AGENTS.md generator (shipped 2026-05-06)
 
-Defer. Audit §4 Phase 4 covers the design (slash command + template).
-Not in this PR.
+**Goal.** Single slash command that walks the user's project root, identifies the stack, and produces a tuned `AGENTS.md`. Lever for "coding ability in unfamiliar repos" because every subsequent turn benefits.
+
+**Files.**
+
+- New: `pythinker/templates/agent/init_agents_md.md` — workflow (explore → identify → read selectively → write), schema (Project overview / Build & test / Code style / Testing / Security / Common file locations), ground rules (don't invent, don't duplicate README, don't overwrite without diffing).
+- New: `pythinker/command/builtins/init.py` — `cmd_init` handler. Renders the template and republishes as a fresh `InboundMessage` with `injected_event="init_agents_md"` metadata so the agent's normal tool-use loop picks it up.
+- Edit: `pythinker/command/builtin.py` — import `cmd_init`, register `router.exact("/init", cmd_init)`.
+- Edit: `pythinker/command/metadata.py` — `CommandMeta("/init", "Walk this project and write a tuned AGENTS.md at the repo root")`.
+- No changes to `loop.py` slash dispatcher — it already routes `/init` via the existing `CommandRouter`. The plan called out `loop.py` but the actual integration point is `register_builtin_commands`.
+
+**Verification.**
+
+- `tests/command/test_init_command.py` — 5 cases: publishes `InboundMessage`, content carries the workflow directives, metadata marks `injected_event`, returns `None` (no competing `OutboundMessage`), router + metadata both list `/init`.
+- `tests/command/test_metadata.py` (existing) still passes — new metadata row covers the new router registration.
+
+**Acceptance gate.**
+
+- [x] Maintainer: approve Phase 4 scope. _Approved + shipped 2026-05-06._
+- [x] Maintainer: confirm no checkpoint-key changes (`_RUNTIME_CHECKPOINT_KEY`, `_PENDING_USER_TURN_KEY`). _Confirmed; `cmd_init` is a synchronous user-message injection only._
+- [x] Maintainer: confirm `/init` is opt-in (no existing path changes). _Confirmed; only adds a new router entry, doesn't touch any registered command._
+
+Phase 4 status: **shipped** at `<this commit>`.
 
 ## 5. Phase 5 — Dynamic injection (deferred, conditional)
 
@@ -209,3 +229,4 @@ Phase 1 status: **shipped** at `d28808f`. Phases 2–5 still gated.
 | Ratified | 2026-05-05 | Phase 1 approval gate ticked retroactively after the change shipped at `d28808f`. The implementation already covers all three checkbox claims (channel guard at `coding_directives.md:9`; token budget verified in audit §7). Phases 2–5 untouched. |
 | Phase 2 | 2026-05-06 | Phase 2 shipped: subagent role split (coder / explore / plan) with tool gating + role-specific prompts. Three new templates, ~30 LOC change in `subagent.py`, ~10 LOC schema change in `spawn.py`, 10 new tests. Approval gate ticked. Phases 3–5 still deferred. |
 | Phase 3 | 2026-05-06 | Phase 3 shipped: structured compaction prompt (six flat section tags). Template-only change to `consolidator_archive.md`; 0 LOC of code change. 2 new prompt-shape tests; existing 8 consolidator tests still green. Approval gate ticked. Phases 4–5 still deferred. |
+| Phase 4 | 2026-05-06 | Phase 4 shipped: `/init` slash command. New template + new `cmd_init` handler + router registration + metadata row. Republishes the rendered prompt as an `InboundMessage` so the agent's normal tool-use loop walks the project and writes `AGENTS.md`. 5 new tests. Approval gate ticked. Phase 5 still deferred (conditional). |

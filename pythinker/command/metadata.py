@@ -76,4 +76,8 @@ BUILTIN_COMMAND_METADATA: tuple[CommandMeta, ...] = (
         "Delete the stored OAuth token for a provider",
         usage="/logout <provider>",
     ),
+    CommandMeta(
+        "/init",
+        "Walk this project and write a tuned AGENTS.md at the repo root",
+    ),
 )

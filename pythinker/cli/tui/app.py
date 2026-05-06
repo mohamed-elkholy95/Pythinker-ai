@@ -746,23 +746,55 @@ def _build_key_bindings(*, overlay, state, chat_pane, editor) -> KeyBindings:
             cleaned = "".join(c for c in pasted if c == "\t" or c.isprintable())
             event.current_buffer.insert_text(cleaned)
 
-    @kb.add("enter", filter=editor_focused_no_overlay)
+    # Slash-menu navigation: when the popup is visible we want Down/Up to
+    # behave as if the visually-highlighted row is the active selection.
+    # HighlightFirstCompletionsMenu paints row 0 even when
+    # ``complete_index is None``; without this binding prompt_toolkit's
+    # default ``complete_next`` does ``None → 0``, producing no visible
+    # change on the first arrow press (the silent-first-press bug).
+    # We mutate ``state.complete_index`` directly — calling
+    # ``go_to_completion`` would also insert the completion's text into
+    # the buffer as a preview, which the menu's docstring warns breaks
+    # subsequent typing. Cycling via modulo keeps navigation predictable
+    # and skips the no-selection state entirely.
+    @kb.add("down", filter=editor_focused_no_overlay)
     def _(event):
-        # Slash-command completion: when the popup is open with no real
-        # selection (complete_index is None — our menu still paints row 0
-        # as current via HighlightFirstCompletionsMenu), accept the top
-        # match AND submit in the same keystroke. One Enter does both —
-        # the visual highlight tells the user which command will run.
-        # If the user wants to add args, the popup auto-closes the moment
-        # they type a space, so subsequent Enter just submits as usual.
         buf = event.current_buffer
         state_ = buf.complete_state
-        if (
-            state_ is not None
-            and state_.completions
-            and state_.complete_index is None
-        ):
-            buf.apply_completion(state_.completions[0])
+        if state_ is not None and state_.completions:
+            n = len(state_.completions)
+            cur = 0 if state_.complete_index is None else state_.complete_index
+            state_.complete_index = (cur + 1) % n
+            event.app.invalidate()
+            return
+        buf.auto_down(count=event.arg)
+
+    @kb.add("up", filter=editor_focused_no_overlay)
+    def _(event):
+        buf = event.current_buffer
+        state_ = buf.complete_state
+        if state_ is not None and state_.completions:
+            n = len(state_.completions)
+            cur = 0 if state_.complete_index is None else state_.complete_index
+            state_.complete_index = (cur - 1) % n
+            event.app.invalidate()
+            return
+        buf.auto_up(count=event.arg)
+
+    @kb.add("enter", filter=editor_focused_no_overlay)
+    def _(event):
+        # Slash-command completion: when the popup is open, accept the
+        # row that's visually highlighted (which matches complete_index,
+        # or row 0 if the user hasn't navigated — HighlightFirstCompletionsMenu
+        # paints row 0 as current when complete_index is None). One Enter
+        # both accepts and submits. If the user wants to add args, the
+        # popup auto-closes the moment they type a space, so subsequent
+        # Enter just submits as usual.
+        buf = event.current_buffer
+        state_ = buf.complete_state
+        if state_ is not None and state_.completions:
+            idx = state_.complete_index if state_.complete_index is not None else 0
+            buf.apply_completion(state_.completions[idx])
         # Submit the editor buffer as a new turn. Retain the task so asyncio's
         # weak-task GC doesn't drop it mid-flight (Python 3.11+ docs).
         task = asyncio.create_task(editor.submit())

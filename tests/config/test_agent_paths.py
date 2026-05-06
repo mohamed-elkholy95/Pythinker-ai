@@ -14,8 +14,17 @@ from pythinker.config import paths as paths_mod
 
 @pytest.fixture(autouse=True)
 def _isolate_home(tmp_path, monkeypatch):
-    """Pin ``Path.home()`` to a tmp dir so tests can write a marker file."""
+    """Pin ``Path.home()`` to a tmp dir cross-platform.
+
+    POSIX uses ``$HOME``; Windows resolves home via ``$USERPROFILE`` first,
+    then ``$HOMEDRIVE`` + ``$HOMEPATH``. Set all three so the same
+    ``Path.home()`` call returns ``tmp_path`` on both runners.
+    """
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("HOMEDRIVE", tmp_path.drive or "")
+    # tmp_path on POSIX has no drive; the rest-of-path is what HOMEPATH wants.
+    monkeypatch.setenv("HOMEPATH", str(tmp_path).removeprefix(tmp_path.drive or ""))
     monkeypatch.delenv("PYTHINKER_AGENT_ID", raising=False)
     yield
 

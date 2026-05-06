@@ -22,7 +22,11 @@ from pythinker.cli.agents import app as agents_app
 
 @pytest.fixture(autouse=True)
 def _isolate_home(tmp_path, monkeypatch):
+    """Pin ``Path.home()`` cross-platform; see ``tests/config/test_agent_paths.py``."""
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("HOMEDRIVE", tmp_path.drive or "")
+    monkeypatch.setenv("HOMEPATH", str(tmp_path).removeprefix(tmp_path.drive or ""))
     monkeypatch.delenv("PYTHINKER_AGENT_ID", raising=False)
     # Reset the loader's cached config-path override between tests.
     from pythinker.config import loader

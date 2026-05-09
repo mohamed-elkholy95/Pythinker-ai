@@ -5,6 +5,26 @@ import { MessageBubble } from "@/components/MessageBubble";
 import type { UIMessage } from "@/lib/types";
 
 describe("MessageBubble", () => {
+  it("renders the streaming placeholder as a WhatsApp-style typing bubble", () => {
+    const message: UIMessage = {
+      id: "a1",
+      role: "assistant",
+      content: "",
+      isStreaming: true,
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} />);
+
+    const typing = screen.getByLabelText("Assistant is typing");
+    expect(typing).toHaveClass("rounded-[16px]", "rounded-bl-[4px]", "bg-card");
+    const dots = typing.querySelectorAll("span.rounded-full");
+    expect(dots).toHaveLength(3);
+    for (const dot of Array.from(dots)) {
+      expect(dot).toHaveClass("typing-dot");
+    }
+  });
+
   it("renders user messages as right-aligned pills", () => {
     const message: UIMessage = {
       id: "u1",

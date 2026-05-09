@@ -152,6 +152,9 @@ export type InboundEvent =
       event: "stream_end";
       chat_id: string;
       stream_id?: string;
+      /** True when this stream segment ended because the agent is continuing
+       * into tools / another model turn, not because the whole turn is done. */
+      resuming?: boolean;
     }
   | {
       event: "transcription_result";

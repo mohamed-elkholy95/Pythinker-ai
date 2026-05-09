@@ -52,10 +52,15 @@ export function ThreadViewport({
     stiffness: 0.05,
     mass: 1.25,
   });
-  // ``_isStreaming`` is intentionally unused here — content reflow is detected
-  // via ResizeObserver inside ``useStickToBottom`` so we no longer need to
-  // schedule scrolls manually on each delta.
-  void _isStreaming;
+  const trailingMessage = messages[messages.length - 1];
+  const trailingContentLength = trailingMessage?.content.length ?? 0;
+
+  // Keep the active turn in view while the agent is streaming or moving
+  // through tool work between stream segments.
+  useEffect(() => {
+    if (!_isStreaming) return;
+    void scrollToBottom("smooth");
+  }, [_isStreaming, messages.length, trailingContentLength, scrollToBottom]);
 
   // Honor a one-shot search-hit jump-to-message request. Skips the
   // auto-stick-to-bottom branch by calling the bubble's native scrollIntoView;
@@ -90,10 +95,10 @@ export function ThreadViewport({
           "[&::-webkit-scrollbar-track]:bg-transparent",
         )}
       >
-        <div ref={contentRef}>
+        <div ref={contentRef} className="flex min-h-full flex-col">
           {hasMessages ? (
-            <div className="mx-auto flex min-h-full w-full max-w-[64rem] flex-col">
-              <div className="flex-1 px-5 pb-32 pt-4 sm:px-6 md:px-8">
+            <div className="mx-auto flex min-h-full w-full max-w-[64rem] flex-1 flex-col">
+              <div className="flex flex-1 flex-col justify-end px-5 pb-4 pt-4 sm:px-6 md:px-8">
                 <ThreadMessages
                   messages={messages}
                   onRegenerate={onRegenerate}
@@ -107,7 +112,7 @@ export function ThreadViewport({
                  * of butting against a hard edge. */}
                 <div
                   aria-hidden
-                  className="h-10 bg-gradient-to-t from-background to-transparent"
+                  className="h-6 bg-gradient-to-t from-background to-transparent"
                 />
                 {/* Composer band — slightly translucent + frosted so content
                  * scrolling underneath is hinted at without bleeding through. */}
@@ -145,7 +150,7 @@ export function ThreadViewport({
               </div>
             </div>
           ) : (
-            <div className="mx-auto flex min-h-full w-full max-w-[64rem] flex-col px-5 sm:px-6 md:px-8">
+            <div className="mx-auto flex min-h-full w-full max-w-[64rem] flex-1 flex-col px-5 sm:px-6 md:px-8">
               <div className="flex w-full flex-1 justify-center pb-16 pt-14 md:pt-[3.5rem]">
                 <div className="flex w-full max-w-[40rem] flex-col gap-5">
                   {emptyState}

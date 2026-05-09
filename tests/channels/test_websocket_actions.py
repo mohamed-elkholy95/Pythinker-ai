@@ -8,6 +8,7 @@ command handler under the per-session lock — see
 ``pythinker/command/builtin.py``.
 """
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -27,6 +28,25 @@ def channel() -> WebSocketChannel:
     bus = MagicMock()
     bus.publish_inbound = AsyncMock()
     return WebSocketChannel(cfg, bus=bus)
+
+
+async def test_stream_end_marks_resuming_work(channel: WebSocketChannel) -> None:
+    connection = MagicMock()
+    connection.send = AsyncMock()
+    channel._attach(connection, "abcd-1234")
+
+    await channel.send_delta(
+        "abcd-1234",
+        "",
+        {"_stream_end": True, "_resuming": True},
+    )
+
+    payload = json.loads(connection.send.await_args.args[0])
+    assert payload == {
+        "event": "stream_end",
+        "chat_id": "abcd-1234",
+        "resuming": True,
+    }
 
 
 async def test_stop_envelope_publishes_priority_command(channel: WebSocketChannel) -> None:

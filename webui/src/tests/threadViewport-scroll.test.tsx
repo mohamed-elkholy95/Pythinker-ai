@@ -9,6 +9,25 @@ function msg(id: string, role: "user" | "assistant", content: string): UIMessage
 }
 
 describe("ThreadViewport scroll-to-message", () => {
+  it("keeps the populated-thread composer rail pinned to the viewport floor", () => {
+    const { container } = render(
+      <ThreadViewport
+        messages={[msg("u1", "user", "hi")]}
+        isStreaming={false}
+        composer={<div>composer</div>}
+        scrollTarget={null}
+      />,
+    );
+
+    const scrollPane = container.querySelector(".absolute.inset-0.overflow-y-auto");
+    const content = scrollPane?.firstElementChild;
+    const threadRail = content?.firstElementChild;
+
+    expect(content).toHaveClass("flex", "min-h-full", "flex-col");
+    expect(threadRail).toHaveClass("flex-1");
+    expect(container.querySelector(".sticky.bottom-0")).toBeInTheDocument();
+  });
+
   it("calls scrollIntoView on the targeted bubble when scrollTarget is set", () => {
     const scrollIntoView = vi.fn();
     // jsdom doesn't ship a real scrollIntoView; stub it on every element.

@@ -1,21 +1,23 @@
 # AGENTS.MD
 
-Telegraph style. Root rules only. Read scoped `AGENTS.md` (e.g. `pythinker/templates/AGENTS.md`) before subtree work.
+Telegraph style. Root rules only. This file is the single source of truth for repository agent instructions. Read scoped `AGENTS.md` (e.g. `pythinker/templates/AGENTS.md`) before subtree work. `CLAUDE.md` is only a compatibility shim; `CLAUDE.local.md` is a gitignored local overlay and must not carry durable project policy.
 
 ## Start
 - Prefer simplicity—no over-engineering. This is a strict requirement for all features, additions, and any changes made to this codebase.
 - Repo: `https://github.com/mohamed-elkholy95/Pythinker-ai`
 - PyPI: `https://pypi.org/project/pythinker-ai/`
 - Replies: repo-root refs only: `pythinker/agent/loop.py:120`. No absolute paths, no `~/`.
-- Read first: `docs/ARCHITECTURE.md` for the runtime spine, `CONTRIBUTING.md` for PR rules, `CLAUDE.md` for agent-specific commands, `SECURITY.md` for known gaps.
+- Read first: `docs/ARCHITECTURE.md` for the runtime spine, `CONTRIBUTING.md` for PR rules, `SECURITY.md` for known gaps.
 - High-confidence answers only when fixing/triaging: verify source, tests, current behavior, and provider/channel contracts before deciding.
 - Provider-backed behavior: read upstream docs/source/types first. Do not assume APIs, defaults, errors, retry/backoff, or response shape — provider quirks are dense (DashScope `enable_thinking`, MiniMax `reasoning_split`, VolcEngine `thinking.type`, Moonshot `temperature=1.0`, Anthropic cache_control markers, Codex/Copilot OAuth).
 - Live-verify when feasible. Check `~/.pythinker/config.json` and `~/.profile` for keys before assuming live tests are blocked; keep secret output redacted.
 - Missing deps: `uv sync --all-extras`, retry once, then report first actionable error.
 - CODEOWNERS: maint/refactor/tests ok. Larger behavior/product/security/ownership changes: owner ask/review.
 - Wording: docs/UI/changelog say "channel/channels" or "chat platform"; `pythinker/channels/` is the internal layout name.
-- AGENTS.md surfaces in this repo:
-  - Root `AGENTS.md` (this file): rules for AI coding agents working on the codebase.
+- Agent-instruction surfaces in this repo:
+  - Root `AGENTS.md` (this file): canonical rules for AI coding agents working on the codebase.
+  - `CLAUDE.md`: Claude Code compatibility shim; point here, do not duplicate rules there.
+  - `CLAUDE.local.md`: gitignored personal overlay; local notes only, no durable project policy.
   - `pythinker/templates/AGENTS.md`: ships into user agent workspaces — published runtime surface.
   - Workspace `AGENTS.md` at runtime: loaded by `ContextBuilder.BOOTSTRAP_FILES = ["AGENTS.md","SOUL.md","USER.md","TOOLS.md"]` (`pythinker/agent/context.py`). Editing the template changes end-user agent behavior.
 - New channel/provider/tool/doc surface: update the matching docs page + tests in the same PR.
@@ -99,7 +101,7 @@ Telegraph style. Root rules only. Read scoped `AGENTS.md` (e.g. `pythinker/templ
 - Docs/changelog-only changes: skip changed-gate; verify links resolve and rendered prose reads cleanly.
 - Do not land related failing lint/type/build/tests. If a failure is unrelated on latest `origin/main`, say so with scoped proof.
 - Verification: include the command and a relevant output snippet in the summary. "It compiles" is not proof.
-- Final answer for any non-trivial change: call the `advisor` tool before declaring done, with the deliverable already durable on disk (per `CLAUDE.local.md` §10a).
+- Final answer for any non-trivial change: include verification commands and relevant output snippets.
 
 ## Code
 

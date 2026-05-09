@@ -1,6 +1,7 @@
 # Project-specific
 .worktrees/
 .claude/
+.pi/
 .assets
 .docs
 .env

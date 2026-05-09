@@ -365,13 +365,16 @@ function LatencySubscript({ latencyMs }: { latencyMs?: number }) {
   );
 }
 
-/** Pre-token-arrival placeholder: three bouncing dots. */
+/** Pre-token-arrival placeholder: WhatsApp-style three bouncing dots. */
 function TypingDots() {
   const { t } = useTranslation();
   return (
     <span
       aria-label={t("message.assistantTyping")}
-      className="inline-flex items-center gap-1 py-1"
+      className={cn(
+        "inline-flex h-7 items-center gap-1 rounded-[16px] rounded-bl-[4px] px-2.5",
+        "border border-border/60 bg-card shadow-sm",
+      )}
     >
       <Dot delay="0ms" />
       <Dot delay="150ms" />
@@ -384,10 +387,7 @@ function Dot({ delay }: { delay: string }) {
   return (
     <span
       style={{ animationDelay: delay }}
-      className={cn(
-        "inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/60",
-        "motion-safe:animate-bounce",
-      )}
+      className="typing-dot inline-block h-[5px] w-[5px] rounded-full bg-muted-foreground/70"
     />
   );
 }

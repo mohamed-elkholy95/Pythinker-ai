@@ -123,6 +123,46 @@ describe("usePythinkerStream", () => {
     expect(result.current.isStreaming).toBe(false);
   });
 
+  it("keeps the working placeholder when stream_end says the agent is resuming", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => usePythinkerStream("chat-t", []), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-t", {
+        event: "delta",
+        chat_id: "chat-t",
+        text: "<think>I should call a tool.</think>",
+      });
+      fake.emit("chat-t", {
+        event: "stream_end",
+        chat_id: "chat-t",
+        resuming: true,
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].role).toBe("assistant");
+    expect(result.current.messages[0].content).toBe("");
+    expect(result.current.messages[0].isStreaming).toBe(true);
+    expect(result.current.isStreaming).toBe(true);
+
+    act(() => {
+      fake.emit("chat-t", {
+        event: "message",
+        chat_id: "chat-t",
+        text: "web_search(query)",
+        kind: "tool_hint",
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages[0].kind).toBe("trace");
+    expect(result.current.messages[1].role).toBe("assistant");
+    expect(result.current.messages[1].isStreaming).toBe(true);
+  });
+
   it("drops the placeholder when stream_end leaves only <think> content", () => {
     // Reasoning models stream chain-of-thought as raw deltas; finalText is
     // non-empty but post-extractThink visible is. Without this gate, every

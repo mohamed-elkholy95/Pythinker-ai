@@ -207,12 +207,28 @@ export function usePythinkerStream(
 
       if (ev.event === "stream_end") {
         if (!buffer.current) {
-          setIsStreaming(false);
+          if (!ev.resuming) setIsStreaming(false);
           return;
         }
         const finalId = buffer.current.messageId;
         const finalText = buffer.current.parts.join("");
         cancelFlush();
+        // ``resuming`` means the agent is still working (usually executing a
+        // tool before the next model turn). Keep the placeholder alive so the
+        // screen never looks idle between stream segments.
+        if (ev.resuming) {
+          buffer.current = { messageId: finalId, parts: [] };
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === finalId
+                ? { ...m, content: "", isStreaming: true, latencyMs: 0 }
+                : m,
+            ),
+          );
+          setIsStreaming(true);
+          startLatency(finalId);
+          return;
+        }
         buffer.current = null;
         // Stop latency BEFORE filtering — otherwise the interval keeps
         // firing against an id that no longer exists in the messages list.
@@ -250,26 +266,32 @@ export function usePythinkerStream(
         if (ev.kind === "tool_hint" || ev.kind === "progress") {
           const line = ev.text;
           setMessages((prev) => {
-            const last = prev[prev.length - 1];
+            const activeId = buffer.current?.messageId;
+            const active = activeId ? prev.find((m) => m.id === activeId) : undefined;
+            const base = activeId ? prev.filter((m) => m.id !== activeId) : prev;
+            const last = base[base.length - 1];
+            let next: UIMessage[];
             if (last && last.kind === "trace" && !last.isStreaming) {
               const merged: UIMessage = {
                 ...last,
                 traces: [...(last.traces ?? [last.content]), line],
                 content: line,
               };
-              return [...prev.slice(0, -1), merged];
+              next = [...base.slice(0, -1), merged];
+            } else {
+              next = [
+                ...base,
+                {
+                  id: crypto.randomUUID(),
+                  role: "tool",
+                  kind: "trace",
+                  content: line,
+                  traces: [line],
+                  createdAt: Date.now(),
+                },
+              ];
             }
-            return [
-              ...prev,
-              {
-                id: crypto.randomUUID(),
-                role: "tool",
-                kind: "trace",
-                content: line,
-                traces: [line],
-                createdAt: Date.now(),
-              },
-            ];
+            return active ? [...next, active] : next;
           });
           return;
         }
@@ -279,6 +301,7 @@ export function usePythinkerStream(
         const activeId = buffer.current?.messageId;
         cancelFlush();
         buffer.current = null;
+        stopLatency(activeId);
         setIsStreaming(false);
         // Tool-pivot turns can also arrive as full ``message`` frames rather
         // than streamed deltas. Skip if there's no visible answer text after

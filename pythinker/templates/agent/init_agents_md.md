@@ -8,7 +8,7 @@ Walk this project's root directory and produce a tuned `AGENTS.md` at the repo r
    - Lint / format: `.ruff.toml`, `.eslintrc*`, `.prettierrc*`, `.editorconfig`, the `[tool.ruff]` block.
    - CI: `.github/workflows/*.yml`, `.gitlab-ci.yml`, `Jenkinsfile`.
    - Top-level dirs: `read_file` no — `list_dir .` and pick the 5–10 names that look load-bearing (`src/`, `lib/`, `app/`, `services/`, `tests/`, `docs/`, `web/`).
-   - Docs the agent should respect: existing `AGENTS.md` (do not overwrite without diffing), `CONTRIBUTING.md`, `CLAUDE.md`, `SECURITY.md`, `README.md`.
+   - Docs the agent should respect: existing `AGENTS.md` (do not overwrite without diffing), scoped `AGENTS.md` files, `CONTRIBUTING.md`, `SECURITY.md`, `README.md`, and `CLAUDE.md` if present as a compatibility pointer.
 
 2. **Identify the stack.** From the manifests, name the language(s), package manager(s), test runner(s), lint tool(s). One sentence per axis.
 

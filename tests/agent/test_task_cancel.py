@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import tempfile
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -16,14 +17,15 @@ _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 def _make_loop(*, exec_config=None):
     """Create a minimal AgentLoop with mocked dependencies."""
+    from pathlib import Path
+
     from pythinker.agent.loop import AgentLoop
     from pythinker.bus.queue import MessageBus
 
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    workspace = MagicMock()
-    workspace.__truediv__ = MagicMock(return_value=MagicMock())
+    workspace = Path(tempfile.mkdtemp())
 
     with patch("pythinker.agent.loop.ContextBuilder"), \
          patch("pythinker.agent.loop.SessionManager"), \

@@ -1,6 +1,7 @@
 # Project-specific
 .worktrees/
 .claude/
+.pi/
 .assets
 .docs
 .env
@@ -61,6 +62,7 @@ share/python-wheels/
 htmlcov/
 coverage.xml
 *.cover
+MagicMock/
 
 # Lock files (project policy)
 poetry.lock

@@ -8,6 +8,7 @@ history rather than silently discarded.
 from __future__ import annotations
 
 import asyncio
+import tempfile
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -96,11 +97,12 @@ async def test_dispatch_cancellation_restores_checkpoint():
     from pythinker.bus.events import InboundMessage
     from pythinker.bus.queue import MessageBus
 
+    from pathlib import Path
+
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    workspace = MagicMock()
-    workspace.__truediv__ = MagicMock(return_value=MagicMock())
+    workspace = Path(tempfile.mkdtemp())
 
     with patch("pythinker.agent.loop.ContextBuilder"), \
          patch("pythinker.agent.loop.SessionManager"), \

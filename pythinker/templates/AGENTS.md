@@ -1,5 +1,9 @@
 # Agent Instructions
 
+> **Audience:** end-user runtime agents running inside a Pythinker workspace.
+> **Not** for contributors developing the Pythinker repo — those rules live in the repo-root `AGENTS.md`.
+> This file is loaded into every system prompt by `ContextBuilder.BOOTSTRAP_FILES` (`pythinker/agent/context.py`); edits ship to PyPI and change end-user agent behavior.
+
 ## Scheduled Reminders
 
 Before scheduling reminders, check available skills and follow skill guidance first.

@@ -17,7 +17,7 @@ Telegraph style. Root rules only. Read scoped `AGENTS.md` (e.g. `pythinker/templ
 - AGENTS.md surfaces in this repo:
   - Root `AGENTS.md` (this file): canonical rules for AI coding agents working on the codebase.
   - `bridge/AGENTS.md` and `webui/AGENTS.md`: scoped subtree rules only; root rules still apply.
-  - `pythinker/templates/AGENTS.md`: ships into user agent workspaces — published runtime surface.
+  - `pythinker/templates/AGENTS.md`: published runtime surface — audience is end-user agents, NOT repo developers. Edits ship to PyPI and change end-user agent behavior.
   - Workspace `AGENTS.md` at runtime: loaded by `ContextBuilder.BOOTSTRAP_FILES = ["AGENTS.md","SOUL.md","USER.md","TOOLS.md"]` (`pythinker/agent/context.py`). Editing the template changes end-user agent behavior.
 - New channel/provider/tool/doc surface: update the matching docs page + tests in the same PR.
 - New `AGENTS.md`: keep root canonical; subtree variants link back rather than duplicate.

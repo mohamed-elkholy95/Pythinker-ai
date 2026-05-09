@@ -6,6 +6,12 @@ All notable user-visible changes to Pythinker land here. The project follows
 
 ## [Unreleased]
 
+### Changed
+
+- `web_fetch` now reports common site-side blocks (`401`, `403`, `451`) as
+  structured `blockedBySite` tool results and logs them as warnings instead of
+  errors.
+
 ## [2.2.0] - 2026-05-06
 
 ### Added

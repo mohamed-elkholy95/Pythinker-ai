@@ -6,6 +6,7 @@ import json
 import socket
 from unittest.mock import patch
 
+import httpx
 import pytest
 
 from pythinker.agent.tools.web import WebFetchTool
@@ -66,6 +67,57 @@ async def test_web_fetch_result_contains_untrusted_flag():
     data = json.loads(result)
     assert data.get("untrusted") is True
     assert "[External content" in data.get("text", "")
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_returns_site_block_metadata_for_expected_http_blocks(monkeypatch):
+    tool = WebFetchTool()
+    warnings = []
+    errors = []
+
+    class FakeResponse:
+        status_code = 403
+        url = "https://example.com/blocked"
+
+        def raise_for_status(self):
+            request = httpx.Request("GET", str(self.url))
+            response = httpx.Response(
+                self.status_code,
+                request=request,
+                headers={"content-type": "text/html"},
+                text="blocked",
+            )
+            raise httpx.HTTPStatusError("blocked", request=request, response=response)
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            return FakeResponse()
+
+    monkeypatch.setattr("pythinker.agent.tools.web.httpx.AsyncClient", FakeClient)
+    monkeypatch.setattr("pythinker.agent.tools.web.logger.warning", lambda *args: warnings.append(args))
+    monkeypatch.setattr("pythinker.agent.tools.web.logger.error", lambda *args: errors.append(args))
+
+    result = await tool._fetch_readability("https://example.com/blocked", "markdown", 1000)
+
+    data = json.loads(result)
+    assert data == {
+        "error": "Blocked by site (403 Forbidden)",
+        "url": "https://example.com/blocked",
+        "finalUrl": "https://example.com/blocked",
+        "status": 403,
+        "blockedBySite": True,
+    }
+    assert warnings
+    assert not errors
 
 
 @pytest.mark.asyncio

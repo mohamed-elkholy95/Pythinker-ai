@@ -90,9 +90,9 @@ export function ThreadViewport({
           "[&::-webkit-scrollbar-track]:bg-transparent",
         )}
       >
-        <div ref={contentRef}>
+        <div ref={contentRef} className="flex min-h-full flex-col">
           {hasMessages ? (
-            <div className="mx-auto flex min-h-full w-full max-w-[64rem] flex-col">
+            <div className="mx-auto flex min-h-full w-full max-w-[64rem] flex-1 flex-col">
               <div className="flex-1 px-5 pb-32 pt-4 sm:px-6 md:px-8">
                 <ThreadMessages
                   messages={messages}
@@ -145,7 +145,7 @@ export function ThreadViewport({
               </div>
             </div>
           ) : (
-            <div className="mx-auto flex min-h-full w-full max-w-[64rem] flex-col px-5 sm:px-6 md:px-8">
+            <div className="mx-auto flex min-h-full w-full max-w-[64rem] flex-1 flex-col px-5 sm:px-6 md:px-8">
               <div className="flex w-full flex-1 justify-center pb-16 pt-14 md:pt-[3.5rem]">
                 <div className="flex w-full max-w-[40rem] flex-col gap-5">
                   {emptyState}

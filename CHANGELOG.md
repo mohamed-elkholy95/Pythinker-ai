@@ -6,6 +6,8 @@ All notable user-visible changes to Pythinker land here. The project follows
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-05-14
+
 ### Added
 
 - WhatsApp voice messages now download bridge-side `audioMessage` media so the

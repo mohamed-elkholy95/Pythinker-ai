@@ -49,6 +49,10 @@ from pythinker.cli.onboard_types import (  # noqa: F401
     StepResult,
     _WizardContext,
 )
+from pythinker.cli.onboard_views.styles import (
+    ONBOARD_QUESTIONARY_STYLE,
+    ONBOARD_SELECT_WITH_BACK_STYLE,
+)
 from pythinker.config.loader import (
     get_config_path,
     load_config,
@@ -362,6 +366,7 @@ _SELECT_FIELD_HINTS: dict[str, tuple[list[str], str]] = {
 # --- Key Bindings for Navigation ---
 
 _BACK_PRESSED = object()  # Sentinel value for back navigation
+_SELECT_WITH_BACK_MAX_VISIBLE = 10
 
 
 def _get_questionary():
@@ -372,6 +377,44 @@ def _get_questionary():
             "Install project dependencies and rerun with 'pythinker onboard'."
         )
     return questionary
+
+
+def _terminal_size() -> tuple[int, int]:
+    """Return terminal size with conservative fallbacks for prompt rendering."""
+    try:
+        size = os.get_terminal_size()
+    except OSError:
+        return 80, 24
+    return min(size.columns, 100), size.lines
+
+
+def _ellipsize_menu_text(text: str, max_width: int) -> str:
+    """Keep one menu row on one terminal line so later options stay visible."""
+    if max_width <= 1:
+        return "…"
+    if len(text) <= max_width:
+        return text
+    return text[: max_width - 1].rstrip() + "…"
+
+
+def _visible_select_choices(
+    choices: list[str],
+    selected_index: int,
+    *,
+    max_visible: int = _SELECT_WITH_BACK_MAX_VISIBLE,
+) -> tuple[int, list[str], bool, bool]:
+    """Return the scroll window for ``_select_with_back``.
+
+    The settings editor can have more rows than the space left below the
+    Rich panel. Keeping a small moving window prevents the final ``[Done]``
+    row from falling below the terminal when long values (tokens) are shown.
+    """
+    if max_visible <= 0 or len(choices) <= max_visible:
+        return 0, choices, False, False
+    half = max_visible // 2
+    start = min(max(0, selected_index - half), len(choices) - max_visible)
+    end = start + max_visible
+    return start, choices[start:end], start > 0, end < len(choices)
 
 
 def _select_with_back(
@@ -395,7 +438,6 @@ def _select_with_back(
     from prompt_toolkit.layout import Layout
     from prompt_toolkit.layout.containers import HSplit, Window
     from prompt_toolkit.layout.controls import FormattedTextControl
-    from prompt_toolkit.styles import Style
 
     # Validate choices
     if not choices:
@@ -412,19 +454,34 @@ def _select_with_back(
 
     # Build menu items (uses closure over selected_index)
     def get_menu_text():
+        width, _height = _terminal_size()
+        start, visible, has_before, has_after = _visible_select_choices(
+            choices,
+            selected_index,
+        )
         items = []
-        for i, choice in enumerate(choices):
+        if has_before:
+            items.append(("class:hint", "  ↑ more\n"))
+        for offset, choice in enumerate(visible):
+            i = start + offset
             if i == selected_index:
                 # Wrap the active row with connected dashes (┄) so it reads as
                 # a hollow striped highlight instead of a filled background.
-                items.append(("class:cursor-row", f"┄ {choice} ┄┄┄\n"))
+                label = _ellipsize_menu_text(choice, width - 7)
+                items.append(("class:cursor-row", f"┄ {label} ┄┄┄\n"))
             else:
-                items.append(("", f"  {choice}\n"))
+                label = _ellipsize_menu_text(choice, width - 2)
+                items.append(("", f"  {label}\n"))
+        if has_after:
+            items.append(("class:hint", "  ↓ more\n"))
         return items
 
     # Create layout
     menu_control = FormattedTextControl(get_menu_text)
-    menu_window = Window(content=menu_control, height=len(choices))
+    menu_height = min(len(choices), _SELECT_WITH_BACK_MAX_VISIBLE)
+    if len(choices) > _SELECT_WITH_BACK_MAX_VISIBLE:
+        menu_height += 2
+    menu_window = Window(content=menu_control, height=menu_height)
 
     prompt_control = FormattedTextControl(lambda: [("class:question", f"◆  {prompt}")])
     # always_hide_cursor: prompt_toolkit otherwise parks its block cursor on the
@@ -469,15 +526,13 @@ def _select_with_back(
         state["result"] = None
         event.app.exit()
 
-    # Style. Use a custom class name (not "selected") because prompt_toolkit's
-    # built-in `selected` class adds reverse-video, which renders as the green
-    # filled box. `noinherit` makes sure no parent rule re-introduces a bg.
-    style = Style.from_dict({
-        "cursor-row": "fg:ansigreen bold noinherit",
-        "question": "fg:cyan",
-    })
-
-    app = Application(layout=layout, key_bindings=bindings, style=style)
+    # Shared style keeps this editor's green active row in sync with the rest
+    # of onboarding's questionary prompts.
+    app = Application(
+        layout=layout,
+        key_bindings=bindings,
+        style=ONBOARD_SELECT_WITH_BACK_STYLE,
+    )
     try:
         app.run()
     except Exception:
@@ -714,6 +769,7 @@ def _input_bool(display_name: str, current: bool | None) -> bool | None:
     return _get_questionary().confirm(
         display_name,
         default=bool(current) if current is not None else False,
+        style=ONBOARD_QUESTIONARY_STYLE,
     ).ask()
 
 
@@ -721,7 +777,11 @@ def _input_text(display_name: str, current: Any, field_type: str, field_info=Non
     """Get text input and parse based on field type."""
     default = _format_value_for_input(current, field_type)
 
-    value = _get_questionary().text(f"{display_name}:", default=default).ask()
+    value = _get_questionary().text(
+        f"{display_name}:",
+        default=default,
+        style=ONBOARD_QUESTIONARY_STYLE,
+    ).ask()
 
     if value is None or value == "":
         return None
@@ -773,6 +833,7 @@ def _input_with_existing(
             display_name,
             choices=["Enter new value", "Keep existing value"],
             default="Keep existing value",
+            style=ONBOARD_QUESTIONARY_STYLE,
         ).ask()
         if choice == "Keep existing value" or choice is None:
             return None
@@ -823,6 +884,7 @@ def _input_model_with_autocomplete(
         completer=DynamicModelCompleter(provider),
         default=default,
         qmark="●",
+        style=ONBOARD_QUESTIONARY_STYLE,
     ).ask()
 
     return value if value else None
@@ -843,6 +905,7 @@ def _input_context_window_with_recommendation(
         display_name,
         choices=choices,
         default="Enter new value",
+        style=ONBOARD_QUESTIONARY_STYLE,
     ).ask()
 
     if choice is None:
@@ -875,6 +938,7 @@ def _input_context_window_with_recommendation(
     value = _get_questionary().text(
         f"{display_name}:",
         default=str(current_val) if current_val else "",
+        style=ONBOARD_QUESTIONARY_STYLE,
     ).ask()
 
     if value is None or value == "":
@@ -1361,6 +1425,7 @@ def _configure_provider(config: Config, provider_name: str) -> None:
                 f"Found {spec.env_key} in environment ({_mask_token(env_value)}). "
                 f"Use this key?",
                 default=True,
+                style=ONBOARD_QUESTIONARY_STYLE,
             ).ask()
             if confirmed:
                 provider_config.api_key = env_value
@@ -1383,7 +1448,9 @@ def _configure_provider(config: Config, provider_name: str) -> None:
                     border_style="cyan",
                 ))
                 if _get_questionary().confirm(
-                    "Open browser now?", default=True,
+                    "Open browser now?",
+                    default=True,
+                    style=ONBOARD_QUESTIONARY_STYLE,
                 ).ask():
                     try:
                         webbrowser.open(signup_url)
@@ -1598,7 +1665,9 @@ def _minimax_followup_validate_step(config: Config, provider_name: str) -> None:
         return
 
     if not _get_questionary().confirm(
-        "Verify the key by listing models?", default=True,
+        "Verify the key by listing models?",
+        default=True,
+        style=ONBOARD_QUESTIONARY_STYLE,
     ).ask():
         return
 
@@ -1674,6 +1743,7 @@ def _configure_minimax_followup(
             "This MiniMax provider is already configured. "
             "Run the region/flavor/model setup again?",
             default=False,
+            style=ONBOARD_QUESTIONARY_STYLE,
         ).ask()
         if agreed:
             _minimax_followup_run_steps(config, provider_name, provider_snapshot)
@@ -1956,7 +2026,11 @@ def _show_summary(config: Config) -> None:
 
 def _pause() -> None:
     """Pause for user acknowledgement before clearing the screen."""
-    _get_questionary().text("Press Enter to continue...", default="").ask()
+    _get_questionary().text(
+        "Press Enter to continue...",
+        default="",
+        style=ONBOARD_QUESTIONARY_STYLE,
+    ).ask()
 
 
 # --- Web Search Configuration ---
@@ -2059,6 +2133,7 @@ def _configure_web_search(config: Config) -> None:
         "Web search provider:",
         choices=choices,
         default=default_label,
+        style=ONBOARD_QUESTIONARY_STYLE,
     ).ask()
     if not picked:
         return
@@ -2079,6 +2154,7 @@ def _configure_web_search(config: Config) -> None:
         use_env = _get_questionary().confirm(
             f"Detected {env_var} in env. Use it?",
             default=True,
+            style=ONBOARD_QUESTIONARY_STYLE,
         ).ask()
         if use_env is None:
             return  # user pressed Ctrl-C — abort the step entirely
@@ -2093,7 +2169,11 @@ def _configure_web_search(config: Config) -> None:
         prompt = f"{provider.capitalize()} API key:"
 
     while True:
-        value = _get_questionary().text(prompt, default="").ask()
+        value = _get_questionary().text(
+            prompt,
+            default="",
+            style=ONBOARD_QUESTIONARY_STYLE,
+        ).ask()
         if value is None:
             return
         value = value.strip()
@@ -2118,7 +2198,9 @@ def _configure_web_search(config: Config) -> None:
 
     # Step 4: Optional live test.
     do_test = _get_questionary().confirm(
-        "Run a test query to verify?", default=True
+        "Run a test query to verify?",
+        default=True,
+        style=ONBOARD_QUESTIONARY_STYLE,
     ).ask()
     if not do_test:
         return

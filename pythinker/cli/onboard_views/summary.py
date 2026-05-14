@@ -176,19 +176,28 @@ def render_pre_save(cfg: Config) -> None:
         "",
     ]
     # Resolve current provider/model/workspace defensively.
-    provider = "(none)"
-    for spec in PROVIDERS:
-        spec_name = spec.name
-        pc = getattr(cfg.providers, spec_name, None)
-        if pc is not None and getattr(pc, "api_key", None):
-            provider = spec_name.replace("_", "-")
-            break
+    provider = cfg.agents.defaults.provider or "auto"
+    if provider == "auto":
+        for spec in PROVIDERS:
+            spec_name = spec.name
+            pc = getattr(cfg.providers, spec_name, None)
+            if pc is not None and getattr(pc, "api_key", None):
+                provider = spec_name.replace("_", "-")
+                break
+    if provider == "auto":
+        provider = "auto (from model prefix)"
 
     model = cfg.agents.defaults.model or "(none)"
     workspace = cfg.agents.defaults.workspace or "(default)"
     body.append(f"Provider:    {provider}")
     body.append(f"Model:       {model}")
     body.append(f"Workspace:   {workspace}")
+    search_provider = cfg.tools.web.search.provider if cfg.tools.web.enable else "disabled"
+    guard_label = "workspace-only" if cfg.tools.restrict_to_workspace else "standard"
+    exec_sandbox = cfg.tools.exec.sandbox or "none"
+    body.append(f"Gateway:     {cfg.gateway.host}:{cfg.gateway.port}")
+    body.append(f"Web search:  {search_provider}")
+    body.append(f"Tool guard:  {guard_label}; exec sandbox={exec_sandbox}")
 
     enabled_channels = []
     for name in ("telegram", "discord", "slack", "matrix", "whatsapp", "websocket"):

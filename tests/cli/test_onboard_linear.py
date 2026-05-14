@@ -677,6 +677,8 @@ def test_step_banner_prints_pythinker_brand(capsys):
     _step_banner(ctx)
     out = capsys.readouterr().out
     assert "Pythinker" in out
+    assert "Model/Auth" in out
+    assert "Review" in out
 
 
 def test_step_intro_opens_bar():
@@ -1766,6 +1768,39 @@ def test_step_search_skip_for_now_no_mutation():
     ):
         result = _step_search_provider(ctx)
     assert result.status == "continue"
+
+
+def test_step_search_default_duckduckgo_is_selectable():
+    from pythinker.cli.onboard import _step_search_provider
+
+    ctx = _WizardContext(draft=Config(), flow="manual")
+
+    def fake_select(_title, *, options, default, searchable):
+        assert searchable is True
+        option_ids = {opt_id for opt_id, _, _ in options}
+        assert default == "duckduckgo"
+        assert default in option_ids
+        return "skip"
+
+    with patch("pythinker.cli.onboard_views.clack.select", side_effect=fake_select):
+        result = _step_search_provider(ctx)
+    assert result.status == "continue"
+
+
+def test_step_search_duckduckgo_does_not_prompt_for_key():
+    from pythinker.cli.onboard import _step_search_provider
+
+    ctx = _WizardContext(draft=Config(), flow="manual")
+    ctx.draft.tools.web.search.provider = "tavily"
+    with patch(
+        "pythinker.cli.onboard_views.clack.select",
+        return_value="duckduckgo",
+    ), patch("pythinker.cli.onboard_views.clack.text") as mock_text, \
+       patch("pythinker.cli.onboard_views.clack.print_status"):
+        result = _step_search_provider(ctx)
+    assert result.status == "continue"
+    assert ctx.draft.tools.web.search.provider == "duckduckgo"
+    mock_text.assert_not_called()
 
 
 def test_step_search_tavily_inline_key():

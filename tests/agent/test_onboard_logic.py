@@ -1006,7 +1006,7 @@ class _FakeQuestionary:
             raise AssertionError("FakeQuestionary ran out of scripted answers")
         return self._answers.pop(0)
 
-    def confirm(self, prompt, default=False):
+    def confirm(self, prompt, default=False, **kwargs):
         self.prompts.append(("confirm", prompt))
 
         class _C:
@@ -1030,7 +1030,7 @@ class _FakeQuestionary:
 
         return _S(self._next())
 
-    def text(self, prompt, default=""):
+    def text(self, prompt, default="", **kwargs):
         self.prompts.append(("text", prompt))
 
         class _T:

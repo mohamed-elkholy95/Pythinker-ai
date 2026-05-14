@@ -1,5 +1,31 @@
 """Reusable note-panel content blocks for the onboarding wizard."""
 
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from rich import box
+from rich.align import Align
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+
+if TYPE_CHECKING:
+    from rich.console import Console
+
+
+SETUP_STEPS = [
+    ("Welcome", "Security model + setup map"),
+    ("Mode", "QuickStart defaults or full manual control"),
+    ("Model/Auth", "Provider, credential path, and default model"),
+    ("Workspace", "Agent files, memory, and local tools"),
+    ("Channels", "Optional chat-platform integrations"),
+    ("Review", "Redacted diff before writing config"),
+    ("Health", "Workspace, model/auth, and gateway preflight"),
+    ("Launch", "Next commands or start gateway"),
+]
+
 SECURITY_DISCLAIMER = [
     "Pythinker is alpha software. Expect rough edges.",
     "By default, Pythinker is a personal agent: one trusted operator boundary.",
@@ -15,8 +41,92 @@ SECURITY_DISCLAIMER = [
     "- Sandbox + least-privilege tools.",
     "- Keep secrets out of the agent's reachable filesystem.",
     "",
+    "Only enable tools/channels when you trust the people and inputs that can reach them.",
     "Docs: docs/security.md",
 ]
+
+
+def _display_path(value: str | Path | None) -> str:
+    if value is None:
+        return "(default)"
+    raw = str(value)
+    try:
+        home = str(Path.home())
+        if raw.startswith(home):
+            return "~" + raw[len(home):]
+    except RuntimeError:
+        pass
+    return raw
+
+
+def render_welcome_panel(
+    console: "Console",
+    *,
+    version: str,
+    config_path: str | Path,
+    workspace: str | Path | None,
+    flow: str,
+    non_interactive: bool,
+) -> None:
+    """Render the first-run terminal graphic before the clack timeline starts.
+
+    Inspired by OpenClaw's first-run setup surface: a compact brand mark,
+    one-sentence security framing, and a visible map of every step before
+    the wizard asks for input. Kept as a Rich panel so non-interactive runs
+    and narrow terminals still degrade to plain terminal output.
+    """
+    title = Text("🐍 Pythinker", style="bold cyan")
+    title.append(f"  {version}", style="dim")
+
+    steps = Table.grid(padding=(0, 1))
+    steps.add_column(justify="center", width=3)
+    steps.add_column(no_wrap=True)
+    steps.add_column(style="dim")
+    for index, (name, hint) in enumerate(SETUP_STEPS, 1):
+        steps.add_row(f"{index}", name, hint)
+
+    details = Table.grid(padding=(0, 2))
+    details.add_column(style="bold")
+    details.add_column()
+    mode_label = f"{flow or 'interactive'}{' (non-interactive)' if non_interactive else ''}"
+    details.add_row("Mode", mode_label)
+    details.add_row("Config", _display_path(config_path))
+    details.add_row("Workspace", _display_path(workspace))
+
+    body = Table.grid(expand=True)
+    body.add_row(Align.center(title))
+    body.add_row("")
+    body.add_row(
+        Align.center(
+            Text(
+                "Guided setup for one assistant across local tools, APIs, and chat platforms.",
+                style="white",
+            )
+        )
+    )
+    body.add_row("")
+    body.add_row(details)
+    body.add_row("")
+    body.add_row(steps)
+    body.add_row("")
+    body.add_row(
+        Text(
+            "Security: treat connected channels and tools as delegated authority.",
+            style="yellow",
+        )
+    )
+
+    console.print(
+        Panel(
+            body,
+            title="setup",
+            subtitle="Ctrl-C cancels before save",
+            border_style="cyan",
+            box=box.ROUNDED,
+            padding=(1, 2),
+        )
+    )
+
 
 CHANNELS_INTRO = [
     "Pythinker can listen on chat platforms.",

@@ -2,7 +2,9 @@
 
 from unittest.mock import patch
 
+from pythinker.cli import onboard
 from pythinker.cli.onboard import _PRE_KEY_HOOKS, _mask_token, _minimax_pre_key
+from pythinker.cli.onboard_views.styles import ONBOARD_QUESTIONARY_STYLE
 from pythinker.config.schema import ProviderConfig
 
 
@@ -28,6 +30,47 @@ def test_mask_token_none_returns_three_stars():
 def _patch_select(answer: str):
     """Patch _select_with_back to return the given answer."""
     return patch("pythinker.cli.onboard._select_with_back", return_value=answer)
+
+
+def test_visible_select_choices_keeps_done_visible_near_bottom():
+    choices = [f"Field {index}" for index in range(12)] + ["[Done]"]
+
+    start, visible, has_before, has_after = onboard._visible_select_choices(
+        choices,
+        selected_index=9,
+    )
+
+    assert start > 0
+    assert has_before is True
+    assert has_after is False
+    assert visible[-1] == "[Done]"
+
+
+def test_ellipsize_menu_text_keeps_long_token_rows_single_line():
+    token_row = "Token: " + "*" * 80 + "W7c"
+    out = onboard._ellipsize_menu_text(token_row, 32)
+    assert out.endswith("…")
+    assert len(out) == 32
+
+
+def test_input_with_existing_uses_shared_questionary_style():
+    class _Prompt:
+        def ask(self):
+            return "Keep existing value"
+
+    class _Questionary:
+        def __init__(self):
+            self.select_kwargs = {}
+
+        def select(self, *args, **kwargs):
+            self.select_kwargs = kwargs
+            return _Prompt()
+
+    questionary = _Questionary()
+    with patch("pythinker.cli.onboard._get_questionary", return_value=questionary):
+        assert onboard._input_with_existing("Token", "existing", "str") is None
+
+    assert questionary.select_kwargs["style"] is ONBOARD_QUESTIONARY_STYLE
 
 
 def test_pre_key_hooks_registry_covers_both_minimax_flavors():

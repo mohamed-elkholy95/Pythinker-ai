@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from pythinker.cli.onboard_views import clack
+from pythinker.cli.onboard_views.styles import ONBOARD_GREEN_HOVER, ONBOARD_QUESTIONARY_STYLE
 
 
 def _capture(fn, *args, **kwargs):
@@ -80,6 +81,13 @@ def test_note_panel_bottom_aligns_with_top_corner():
     )
 
 
+def test_questionary_style_uses_green_hover():
+    rules = dict(ONBOARD_QUESTIONARY_STYLE.style_rules)
+    assert rules["highlighted"] == ONBOARD_GREEN_HOVER
+    assert rules["pointer"] == ONBOARD_GREEN_HOVER
+    assert rules["selected"] == ONBOARD_GREEN_HOVER
+
+
 def test_confirm_yes():
     with patch("pythinker.cli.onboard_views.clack.questionary") as q:
         q.confirm.return_value.ask.return_value = True
@@ -87,6 +95,11 @@ def test_confirm_yes():
     # Should render ◇ Continue? / │ Yes after submit.
     assert "◇  Continue?" in out
     assert "│  Yes" in out
+    q.confirm.assert_called_once_with(
+        "Continue?",
+        default=False,
+        style=ONBOARD_QUESTIONARY_STYLE,
+    )
 
 
 def test_confirm_no():
@@ -282,6 +295,7 @@ def test_select_default_passed_as_choice_value():
     assert result == "openai_codex"
     assert len(captured_calls) == 1
     assert captured_calls[0]["default"] == "openai_codex"
+    assert captured_calls[0]["kwargs"]["style"] is ONBOARD_QUESTIONARY_STYLE
 
 
 def test_select_searchable_flag_threads_to_questionary():
@@ -303,6 +317,7 @@ def test_select_searchable_flag_threads_to_questionary():
             searchable=True,
         )
 
+    assert captured.get("style") is ONBOARD_QUESTIONARY_STYLE
     assert captured.get("use_search_filter") is True
     assert captured.get("use_jk_keys") is False
 

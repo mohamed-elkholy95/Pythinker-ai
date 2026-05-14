@@ -106,6 +106,7 @@ def _step_search_provider(ctx: _WizardContext) -> StepResult:
 
     options: list[tuple[str, str, str]] = []
     for opt_id, base, hint in (
+        ("duckduckgo", "DuckDuckGo Search", "free, no key"),
         ("tavily", "Tavily Search", "TAVILY_API_KEY · structured results"),
         ("brave", "Brave Search", "BRAVE_API_KEY"),
         ("perplexity", "Perplexity Search", "PERPLEXITY_API_KEY"),
@@ -116,14 +117,19 @@ def _step_search_provider(ctx: _WizardContext) -> StepResult:
         options.insert(0, ("__keep__", f"Keep current ({current_provider})", "no changes"))
     options.append(("skip", "Skip for now", ""))
 
+    option_ids = {opt_id for opt_id, _, _ in options}
     default = "__keep__" if current_provider in configured_providers else (
-        current_provider if current_provider else "tavily"
+        current_provider if current_provider in option_ids else "tavily"
     )
     chosen = clack.select(
         "Search provider", options=options, default=default, searchable=True
     )
 
     if chosen in ("skip", "__keep__"):
+        return StepResult(status="continue")
+    if chosen == "duckduckgo":
+        _activate_search_provider(ctx.draft, chosen)
+        clack.print_status("Search provider: duckduckgo (free, no key)")
         return StepResult(status="continue")
 
     pasted = clack.text(f"{chosen} API key (or env var name like TAVILY_API_KEY):")

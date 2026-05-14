@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from pythinker.admin.redact import _path_value, _redact_url, _redacted_path_is_set
 
-
 # ---------------------------------------------------------------------------
 # _path_value
 # ---------------------------------------------------------------------------

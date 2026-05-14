@@ -2,36 +2,23 @@
 
 from __future__ import annotations
 
-import os
-
 from pythinker.cli.onboard_types import StepResult, _WizardContext
-
-_BANNER = r"""
-██████  ██    ██ ████████ ██   ██ ██ ███    ██ ██   ██ ███████ ██████
-██   ██  ██  ██     ██    ██   ██ ██ ████   ██ ██  ██  ██      ██   ██
-██████    ████      ██    ███████ ██ ██ ██  ██ █████   █████   ██████
-██         ██       ██    ██   ██ ██ ██  ██ ██ ██  ██  ██      ██   ██
-██         ██       ██    ██   ██ ██ ██   ████ ██   ██ ███████ ██   ██
-"""
 
 
 def _step_banner(ctx: _WizardContext) -> StepResult:
-    """Print the Pythinker ASCII banner + tagline."""
-    from pythinker.cli import onboard as _onboard
-
-    try:
-        cols = os.get_terminal_size().columns
-    except OSError:
-        cols = 80
-    if cols >= 60:
-        for line in _BANNER.strip("\n").splitlines():
-            _onboard.console.print(line)
-        _onboard.console.print("\n                       🐍 PYTHINKER 🐍\n")
-
+    """Print the polished first-run setup panel."""
     from pythinker import __version__
+    from pythinker.cli import onboard as _onboard
+    from pythinker.cli.onboard_views.panels import render_welcome_panel
 
-    _onboard.console.print(f"🐍 Pythinker {__version__}")
-    _onboard.console.print("   Personal AI agent framework. ~2 minutes.\n")
+    render_welcome_panel(
+        _onboard.console,
+        version=__version__,
+        config_path=_onboard.get_config_path(),
+        workspace=ctx.workspace_override or ctx.draft.agents.defaults.workspace,
+        flow=ctx.flow,
+        non_interactive=ctx.non_interactive,
+    )
     return StepResult(status="continue")
 
 
@@ -57,7 +44,8 @@ def _step_outro(ctx: _WizardContext) -> StepResult:
 
     clack.outro("🐍 Pythinker is ready.")
     _onboard.console.print("\nNext:")
-    _onboard.console.print("  pythinker agent       interactive chat")
+    _onboard.console.print("  pythinker tui         full-screen chat")
+    _onboard.console.print("  pythinker agent       terminal chat / one-shot prompts")
     _onboard.console.print("  pythinker gateway     start channels + API")
     _onboard.console.print("  pythinker doctor      verify your setup anytime\n")
     return StepResult(status="continue")

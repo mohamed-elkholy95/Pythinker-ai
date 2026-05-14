@@ -42,11 +42,14 @@ def _step_quickstart_summary(ctx: _WizardContext) -> StepResult:
         return StepResult(status="skip")
 
     body = [
-        "Gateway port: 18790",
-        "Gateway bind: Loopback (127.0.0.1)",
-        "Workspace: ~/.pythinker/workspace",
-        "Channels: configured later via `pythinker onboard` (Manual mode).",
-        "Web search: deferred",
+        "QuickStart keeps the OpenClaw-style clean path: pick model/auth, confirm workspace, review, health-check, then launch.",
+        "",
+        "1. Model/Auth: choose a provider and credential path.",
+        "2. Default model: use a recommended model or enter one manually.",
+        "3. Workspace: ~/.pythinker/workspace unless overridden.",
+        "4. Gateway: loopback on 127.0.0.1:18790.",
+        "5. Channels: configured later via `pythinker onboard --flow manual`.",
+        "6. Review + health: redacted diff, workspace check, auth/model check, port check.",
     ]
     clack.note("QuickStart", body)
     clack.bar_break()

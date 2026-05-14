@@ -46,8 +46,8 @@ export function SearchResults({
               type="button"
               onClick={() => onSelect(hit)}
               className={cn(
-                "flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left",
-                "text-[12.5px] transition-colors hover:bg-sidebar-accent/45",
+                "menu-green-hover flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left",
+                "text-[12.5px]",
               )}
             >
               <span className="flex w-full items-center gap-1 truncate font-medium leading-5">
@@ -74,7 +74,7 @@ export function SearchResults({
           <Button
             variant="ghost"
             size="sm"
-            className="w-full justify-center"
+            className="menu-green-hover w-full justify-center"
             onClick={onLoadMore}
             disabled={loading}
           >

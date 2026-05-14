@@ -49,16 +49,15 @@ def test_long_hint_is_ellipsized_to_fit_terminal():
 
 def test_minimum_budget_is_respected_in_extreme_cases():
     """Even if the title + display already overflow the terminal, the
-    truncator must still leave at least ~10 visible chars of hint
-    (12 budget minus the ellipsis char and any trailing whitespace
-    stripped before the ellipsis appended). Better a wrap than a
-    useless single-character hint."""
+    truncator must still leave a useful visible hint (18 budget minus the
+    ellipsis char and any trailing whitespace stripped before the ellipsis
+    appended). Better a wrap than a useless single-character hint."""
     with _at(40):
         out = _truncate_hint(
             "structured results", title="A very long title goes here", display="OptionDisplay"
         )
     visible = out.rstrip("…")
-    assert len(visible) >= 10  # min-budget 12 minus ellipsis + possible rstrip
+    assert len(visible) >= 16  # min-budget 18 minus ellipsis + possible rstrip
 
 
 def test_uses_terminal_width_at_call_time(monkeypatch):

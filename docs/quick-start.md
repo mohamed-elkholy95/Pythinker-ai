@@ -56,12 +56,11 @@ pythinker doctor
 ## Quick Start
 
 ```bash
-pythinker onboard                           # writes ~/.pythinker/config.json
-pythinker provider login openai-codex       # OAuth sign-in — opens your browser
-pythinker agent                             # interactive chat
+pythinker onboard                           # guided setup; writes ~/.pythinker/config.json
+pythinker tui                               # full-screen chat
 ```
 
-That's it. `pythinker onboard` ships a config preconfigured for **OpenAI Codex via ChatGPT OAuth** — no API key needed; you just sign in via `provider login`.
+That's it. `pythinker onboard` walks through a visual terminal wizard: welcome/security notice, QuickStart vs Manual, provider/auth, model, workspace, optional channels, redacted review, and a post-save health check. QuickStart defaults to **OpenAI Codex via ChatGPT OAuth** when you choose that provider.
 
 ### Using a different provider or model?
 
@@ -83,9 +82,9 @@ Provider is auto-detected from the model prefix (`openai-codex/…`, `anthropic/
 
 For a richer interactive experience, run `pythinker tui` (alias
 `pythinker chat`). It opens a full-screen chat with slash-command
-pickers for sessions, models, providers, and themes. The CLI
-`pythinker agent` remains the right tool for one-shot prompts and
-scripts.
+pickers for sessions, models, providers, and themes. The onboarding
+success screen recommends this first. The CLI `pythinker agent` remains
+the right tool for one-shot prompts and scripts.
 
 ### Troubleshooting
 

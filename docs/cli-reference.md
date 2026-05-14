@@ -45,9 +45,10 @@ Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 ## `pythinker onboard`
 
 Walk a fresh user from zero to a saved `~/.pythinker/config.json` via
-the linear wizard. Asks about provider + auth, default model, workspace,
-gateway, and channels; renders a pre-save diff and (optionally) starts
-the gateway and opens the WebUI.
+the linear wizard. It starts with a compact terminal setup graphic, then
+asks about provider + auth, default model, workspace, gateway, and
+channels; renders a redacted pre-save diff; runs a post-save health
+check; and optionally starts the gateway and opens the WebUI.
 
 ```
 pythinker onboard [--workspace DIR] [--config PATH] [--non-interactive]
@@ -71,10 +72,11 @@ pythinker onboard [--workspace DIR] [--config PATH] [--non-interactive]
 | `--reset` | unset | One of `config | credentials | sessions | full` — wipe before onboarding. |
 | `--print-required-flags` | off | Print the exact `--flag` set required for a zero-prompt run given current config; exits 0. |
 
-Interactive runs render a pre-save diff (green added / yellow changed
-/ red removed) before asking Save? / Discard?, with secret-bearing
-fields auto-redacted. Post-save runs a green/yellow/red health check
-(workspace writable, gateway port free, OAuth token validity).
+Interactive runs render a pre-save diff before asking Save? /
+Discard?, with secret-bearing fields auto-redacted. Post-save runs a
+health check (workspace writable, default model, provider auth, gateway
+port) and ends with next commands for `pythinker tui`, `pythinker agent`,
+`pythinker gateway`, and `pythinker doctor`.
 
 ## `pythinker agent`
 

@@ -164,7 +164,7 @@ export function Sidebar(props: SidebarProps) {
           size="icon"
           aria-label={t("sidebar.collapse")}
           onClick={props.onCollapse}
-          className="h-11 w-11 sm:h-7 sm:w-7 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          className="menu-green-hover h-11 w-11 rounded-lg text-muted-foreground sm:h-7 sm:w-7"
         >
           <PanelLeftClose className="h-3.5 w-3.5" />
         </Button>
@@ -173,7 +173,7 @@ export function Sidebar(props: SidebarProps) {
           size="icon"
           aria-label={t("sidebar.toggleTheme")}
           onClick={props.onToggleTheme}
-          className="h-11 w-11 sm:h-7 sm:w-7 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          className="menu-green-hover h-11 w-11 rounded-lg text-muted-foreground sm:h-7 sm:w-7"
         >
           {props.theme === "dark" ? (
             <Sun className="h-3.5 w-3.5" />
@@ -185,7 +185,7 @@ export function Sidebar(props: SidebarProps) {
       <div className="px-3 pb-3">
         <Button
           onClick={props.onNewChat}
-          className="h-9 w-full justify-start gap-2 rounded-xl border border-sidebar-border/80 bg-card/45 px-3 text-[13px] font-medium text-sidebar-foreground shadow-sm hover:bg-sidebar-accent/80"
+          className="menu-green-hover h-9 w-full justify-start gap-2 rounded-xl border border-sidebar-border/80 bg-card/45 px-3 text-[13px] font-medium text-sidebar-foreground shadow-sm"
           variant="outline"
         >
           <Plus className="h-3.5 w-3.5" />
@@ -311,7 +311,7 @@ export function Sidebar(props: SidebarProps) {
           <Button
             variant="ghost"
             size="icon"
-            className="h-11 w-11 sm:h-6 sm:w-6 rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            className="menu-green-hover h-11 w-11 rounded-md text-muted-foreground sm:h-6 sm:w-6"
             onClick={props.onRefresh}
             aria-label={t("sidebar.refreshSessions")}
           >
@@ -377,10 +377,8 @@ function NavButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex h-8 w-full items-center gap-2 rounded-xl px-2.5 text-left text-xs transition-all",
-        "text-muted-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
-        active
-          && "bg-primary/[0.12] text-sidebar-foreground shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.28)]",
+        "menu-green-hover flex h-8 w-full items-center gap-2 rounded-xl px-2.5 text-left text-xs text-muted-foreground",
+        active && "menu-green-active",
       )}
     >
       {icon}

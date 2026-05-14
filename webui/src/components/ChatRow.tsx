@@ -47,10 +47,8 @@ export function ChatRow({
   return (
     <div
       className={cn(
-        "group flex items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] transition-colors",
-        active
-          ? "bg-sidebar-accent/80 text-sidebar-accent-foreground dark:text-white shadow-[inset_0_0_0_1px_hsl(var(--border)/0.4)]"
-          : "text-sidebar-foreground/88 hover:bg-sidebar-accent/45",
+        "menu-green-hover group flex items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-sidebar-foreground/88",
+        active && "menu-green-active",
       )}
     >
       <button
@@ -98,8 +96,8 @@ export function ChatRow({
           className={cn(
             "inline-flex h-6 w-6 items-center justify-center rounded-md opacity-0 transition-opacity",
             active
-              ? "text-current opacity-100 hover:bg-sidebar-accent/60"
-              : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover:opacity-100",
+              ? "menu-green-hover text-current opacity-100"
+              : "menu-green-hover text-muted-foreground group-hover:opacity-100",
             "focus-visible:opacity-100",
           )}
           aria-label={t("chat.actions", { title })}

@@ -139,6 +139,27 @@
     background-size: auto, 36px 36px, 36px 36px;
   }
 
+  .menu-green-active {
+    background-color: hsl(var(--primary) / 0.12) !important;
+    color: hsl(var(--foreground)) !important;
+    box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.28) !important;
+  }
+
+  .menu-green-hover {
+    transition-property: color, background-color, border-color, box-shadow, transform;
+    transition-duration: 150ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .menu-green-hover:hover,
+  .menu-green-hover:focus-visible,
+  .menu-green-hover[data-state="open"],
+  .menu-green-hover[data-highlighted] {
+    background-color: hsl(var(--primary) / 0.12) !important;
+    color: hsl(var(--foreground)) !important;
+    box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.28) !important;
+  }
+
   /* Markdown body styles, ported from agent-chat-ui's markdown-styles.css. */
   .markdown-content > :first-child {
     @apply mt-0;

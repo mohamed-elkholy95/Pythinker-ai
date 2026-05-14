@@ -451,10 +451,8 @@ export function ConfigWorkbench({ token, surfaces, onRefresh }: ConfigWorkbenchP
                 type="button"
                 onClick={() => setMode(item)}
                 className={cn(
-                  "rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
-                  mode === item
-                    ? "bg-primary/15 text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.28)]"
-                    : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+                  "menu-green-hover h-8 rounded-xl px-2.5 text-left text-xs text-muted-foreground",
+                  mode === item && "menu-green-active",
                 )}
               >
                 {MODE_LABELS[item]}
@@ -469,10 +467,10 @@ export function ConfigWorkbench({ token, surfaces, onRefresh }: ConfigWorkbenchP
                 key={entry.path}
                 type="button"
                 onClick={() => focusPath(entry.path)}
-                className="rounded-lg px-2 py-1.5 text-left text-xs hover:bg-accent/40"
+                className="menu-green-hover rounded-xl px-2.5 py-1.5 text-left text-xs text-muted-foreground"
               >
-                <span className="block truncate font-mono text-foreground">{entry.path}</span>
-                <span className="block truncate text-muted-foreground">{entry.title} · {entry.type}</span>
+                <span className="block truncate font-mono">{entry.path}</span>
+                <span className="block truncate opacity-75">{entry.title} · {entry.type}</span>
               </button>
             ))}
           </div>
@@ -485,11 +483,11 @@ export function ConfigWorkbench({ token, surfaces, onRefresh }: ConfigWorkbenchP
             {rootEntries.map((root) => {
               const rootPending = pending.filter((item) => item.path === root || item.path.startsWith(`${root}.`)).length;
               return (
-                <Button
+                <button
                   aria-current={activeRoot === root ? "page" : undefined}
                   className={cn(
-                    "shrink-0 justify-start xl:w-full",
-                    activeRoot === root && "border-primary bg-primary/10 text-primary",
+                    "menu-green-hover flex h-8 shrink-0 items-center gap-2 rounded-xl px-2.5 text-left text-xs text-muted-foreground xl:w-full",
+                    activeRoot === root && "menu-green-active",
                   )}
                   key={root}
                   onClick={() => {
@@ -498,11 +496,10 @@ export function ConfigWorkbench({ token, surfaces, onRefresh }: ConfigWorkbenchP
                     setMode("guided");
                   }}
                   type="button"
-                  variant={activeRoot === root ? "outline" : "ghost"}
                 >
                   <span className="truncate">{titleFor(root)}</span>
                   {rootPending > 0 ? <span className="ml-auto rounded-full bg-primary/15 px-1.5 text-[10px] text-primary">{rootPending}</span> : null}
-                </Button>
+                </button>
               );
             })}
           </div>

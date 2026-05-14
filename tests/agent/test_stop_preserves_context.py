@@ -94,10 +94,10 @@ async def test_dispatch_cancellation_restores_checkpoint():
     isolation, so a future refactor that drops the cancel-time restore is
     caught by CI instead of silently regressing.
     """
+    from pathlib import Path
+
     from pythinker.bus.events import InboundMessage
     from pythinker.bus.queue import MessageBus
-
-    from pathlib import Path
 
     bus = MessageBus()
     provider = MagicMock()

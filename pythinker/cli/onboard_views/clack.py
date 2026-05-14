@@ -27,6 +27,8 @@ from typing import TextIO
 
 import questionary
 
+from pythinker.cli.onboard_views.styles import ONBOARD_QUESTIONARY_STYLE
+
 # Mutable singleton so tests can patch the output stream.
 _OUT: TextIO = sys.stdout
 
@@ -137,15 +139,15 @@ def _truncate_hint(hint: str, *, title: str, display: str) -> str:
 
     Budget: ``terminal_width - len(prompt-glyph "?  ") - len(title) -
     len("  ") - len(display) - len("  ") - len("…")``. Anything tighter
-    than 12 chars falls back to a hard 12-char minimum so the hint is
-    still visible. Empty/None hints pass through.
+    than 18 chars falls back to a hard 18-char minimum so the hint is
+    still useful on narrow terminals. Empty/None hints pass through.
     """
     if not hint:
         return hint
     overhead = 3 + len(title) + 2 + len(display) + 2 + 1  # "?  " + "  " + "  " + "…"
     budget = _terminal_width() - overhead
-    if budget < 12:
-        budget = 12
+    if budget < 18:
+        budget = 18
     if len(hint) <= budget:
         return hint
     return hint[: budget - 1].rstrip() + "…"
@@ -199,7 +201,11 @@ def confirm(question: str, *, default: bool = False) -> bool:
     Raises `WizardCancelled` on Ctrl-C / Esc (questionary returns None).
     """
     # Active state: questionary owns the render area.
-    answer = questionary.confirm(question, default=default).ask()
+    answer = questionary.confirm(
+        question,
+        default=default,
+        style=ONBOARD_QUESTIONARY_STYLE,
+    ).ask()
     if answer is None:
         raise WizardCancelled(question)
 
@@ -242,6 +248,7 @@ def select(
         title,
         choices=choices,
         default=default,
+        style=ONBOARD_QUESTIONARY_STYLE,
         use_search_filter=searchable,
         use_jk_keys=not searchable,  # j/k navigation conflicts with search input.
     ).ask()
@@ -273,7 +280,11 @@ def text(question: str, *, default: str = "") -> str:
 
     Raises WizardCancelled on Ctrl-C / Esc.
     """
-    answer = questionary.text(question, default=default).ask()
+    answer = questionary.text(
+        question,
+        default=default,
+        style=ONBOARD_QUESTIONARY_STYLE,
+    ).ask()
     if answer is None:
         raise WizardCancelled(question)
     _rewrite_resolved(question, answer)
@@ -309,7 +320,9 @@ def multiselect(
     # Append a hint so users know SPACE toggles a row (Enter only confirms the
     # current set — without this, hitting Enter on a row submits an empty list).
     answer = questionary.checkbox(
-        f"{title}  (space to toggle, enter to confirm)", choices=choices
+        f"{title}  (space to toggle, enter to confirm)",
+        choices=choices,
+        style=ONBOARD_QUESTIONARY_STYLE,
     ).ask()
     if answer is None:
         raise WizardCancelled(title)

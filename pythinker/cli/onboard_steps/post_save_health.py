@@ -90,5 +90,14 @@ def _step_post_save_health(ctx: _WizardContext) -> StepResult:
     except Exception as exc:  # noqa: BLE001
         _emit("warn", "Gateway port", f"check skipped ({exc})")
 
+    clack.note(
+        "Ready to launch",
+        [
+            "pythinker tui       full-screen chat",
+            "pythinker agent     terminal chat / one-shot prompts",
+            "pythinker gateway   API + WebUI + chat channels",
+            "pythinker doctor    re-run these checks later",
+        ],
+    )
     clack.bar_break()
     return StepResult(status="continue")

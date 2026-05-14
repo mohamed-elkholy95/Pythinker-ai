@@ -61,6 +61,8 @@ class Session:
 
         out: list[dict[str, Any]] = []
         for message in sliced:
+            if message.get("_command"):
+                continue
             content = message.get("content", "")
             # Synthesize an ``[image: path]`` breadcrumb from the persisted
             # ``media`` kwarg so LLM replay still sees *something* where the

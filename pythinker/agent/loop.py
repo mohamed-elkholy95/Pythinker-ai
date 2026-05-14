@@ -518,6 +518,20 @@ class AgentLoop:
 
         return format_tool_hints(tool_calls)
 
+    def _persist_command_turn(
+        self,
+        msg: InboundMessage,
+        session: Session,
+        raw: str,
+        result: OutboundMessage,
+    ) -> None:
+        """Persist a slash-command exchange for UI history, but keep it out of LLM context."""
+        if raw.lower() == "/new":
+            return
+        session.add_message("user", msg.content, _command=True)
+        session.add_message("assistant", result.content, _command=True)
+        self.sessions.save(session)
+
     async def _dispatch_command_inline(
         self,
         msg: InboundMessage,
@@ -526,9 +540,11 @@ class AgentLoop:
         dispatch_fn: Callable[[CommandContext], Awaitable[OutboundMessage | None]],
     ) -> None:
         """Dispatch a command directly from the run() loop and publish the result."""
-        ctx = CommandContext(msg=msg, session=None, key=key, raw=raw, loop=self)
+        session = self.sessions.get_or_create(key)
+        ctx = CommandContext(msg=msg, session=session, key=key, raw=raw, loop=self)
         result = await dispatch_fn(ctx)
         if result:
+            self._persist_command_turn(msg, session, raw, result)
             await self.bus.publish_outbound(result)
         else:
             logger.warning("Command '{}' matched but dispatch returned None", raw)
@@ -1256,6 +1272,7 @@ class AgentLoop:
         raw = msg.content.strip()
         ctx = CommandContext(msg=msg, session=session, key=key, raw=raw, loop=self)
         if result := await self.commands.dispatch(ctx):
+            self._persist_command_turn(msg, session, raw, result)
             return result
 
         await self.consolidator.maybe_consolidate_by_tokens(

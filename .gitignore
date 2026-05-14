@@ -10,6 +10,7 @@
 .omx
 blackbox/
 docs/superpowers/
+docs/nanobot-upstream-audit.md
 
 # webui (monorepo frontend)
 webui/node_modules/

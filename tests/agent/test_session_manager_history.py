@@ -194,6 +194,21 @@ def test_get_history_preserves_reasoning_content():
     ]
 
 
+def test_get_history_excludes_command_messages():
+    session = Session(key="test:commands")
+    session.add_message("user", "real question")
+    session.add_message("assistant", "real answer")
+    session.add_message("user", "/help", _command=True)
+    session.add_message("assistant", "help text", _command=True)
+
+    history = session.get_history(max_messages=500)
+
+    assert history == [
+        {"role": "user", "content": "real question"},
+        {"role": "assistant", "content": "real answer"},
+    ]
+
+
 # --- Window cuts mid-group: assistant present but some tool results orphaned ---
 
 def test_window_cuts_mid_tool_group():

@@ -594,6 +594,38 @@ async def test_multiple_subagent_followups_all_persist_as_standalone_history(tmp
     ]
 
 
+@pytest.mark.asyncio
+async def test_shortcut_command_persisted_with_command_flag(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/help")
+
+    response = await loop._process_message(msg)
+
+    assert response is not None
+    session = loop.sessions.get_or_create("cli:test")
+    assert len(session.messages) == 2
+    assert session.messages[0]["role"] == "user"
+    assert session.messages[0]["content"] == "/help"
+    assert session.messages[0].get("_command") is True
+    assert session.messages[1]["role"] == "assistant"
+    assert session.messages[1].get("_command") is True
+    await loop.close_mcp()
+
+
+@pytest.mark.asyncio
+async def test_inline_command_dispatch_persists_command_turn(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/help")
+
+    await loop._dispatch_command_inline(msg, msg.session_key, "/help", loop.commands.dispatch)
+
+    outbound = await asyncio.wait_for(loop.bus.consume_outbound(), timeout=1)
+    assert outbound.content.startswith("🐍 pythinker commands:")
+    session = loop.sessions.get_or_create("cli:test")
+    assert [m.get("_command") for m in session.messages] == [True, True]
+    await loop.close_mcp()
+
+
 def test_prompt_merge_does_not_replace_standalone_subagent_history_entry(tmp_path: Path) -> None:
     loop = _mk_loop()
     session = Session(key="cli:merge")

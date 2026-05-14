@@ -1,5 +1,5 @@
 """
-pythinker - A lightweight AI agent framework
+pythinker - A tiny agent framework
 """
 
 import tomllib

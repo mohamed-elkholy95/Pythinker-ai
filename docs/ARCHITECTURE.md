@@ -8,7 +8,7 @@
 
 ## 1. Executive Summary
 
-**What the system does.** Pythinker — packaged on PyPI as `pythinker-ai` — is a lightweight, channel-agnostic personal-AI-assistant framework. A single Python process ("gateway") ingests messages from several chat platforms (Slack, Telegram, Discord, WhatsApp, Matrix, MS Teams, email, a React WebSocket WebUI, and an OpenAI-compatible HTTP API), routes them to an agent loop, calls an LLM (any of ~25 supported providers), executes tools (shell, filesystem, web search/fetch, notebook, MCP servers, subagents, cron), and sends replies back to the originating channel. Persistent session history, long-term memory ("Dream"/MEMORY.md), scheduled jobs, and a periodic "heartbeat" task-checker round out the runtime.
+**What the system does.** Pythinker — packaged on PyPI as `pythinker-ai` — is a tiny, channel-agnostic personal-AI-assistant framework. A single Python process ("gateway") ingests messages from several chat platforms (Slack, Telegram, Discord, WhatsApp, Matrix, MS Teams, email, a React WebSocket WebUI, and an OpenAI-compatible HTTP API), routes them to an agent loop, calls an LLM (any of ~25 supported providers), executes tools (shell, filesystem, web search/fetch, notebook, MCP servers, subagents, cron), and sends replies back to the originating channel. Persistent session history, long-term memory ("Dream"/MEMORY.md), scheduled jobs, and a periodic "heartbeat" task-checker round out the runtime.
 
 **Stack at a glance.**
 

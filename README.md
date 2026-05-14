@@ -14,13 +14,13 @@
   </p>
 </div>
 
-🐍 **Pythinker** is an open-source, ultra-lightweight personal-AI-agent framework. It keeps the core agent loop small and readable while still supporting chat channels, long-term memory, MCP, and practical deployment paths — so you can go from local setup to a long-running personal agent with minimal overhead.
+🐍 **Pythinker** is an open-source tiny agent framework. It keeps the core agent loop compact and readable while still supporting chat channels, long-term memory, MCP, and practical deployment paths — so you can go from local setup to a long-running personal agent with minimal overhead.
 
-> Powered by a small, multiplexing agent loop: one Python process listens to Slack, Telegram, Discord, WhatsApp, Matrix, MS Teams, email, a WebSocket WebUI, and an OpenAI-compatible HTTP API — all backed by a single session-scoped memory layer.
+> Powered by a tiny, multiplexing agent loop: one Python process listens to Slack, Telegram, Discord, WhatsApp, Matrix, MS Teams, email, a WebSocket WebUI, and an OpenAI-compatible HTTP API — all backed by a single session-scoped memory layer.
 
 ## 💡 Key Features
 
-- **Ultra-lightweight** — a small readable core. Stable long-running behavior without orchestration sprawl.
+- **Tiny agent** — a compact readable core. Stable long-running behavior without orchestration sprawl.
 - **Channel-agnostic** — Slack, Telegram, Discord, WhatsApp, Matrix, MS Teams, email, WebSocket, plus an OpenAI-compatible HTTP API.
 - **Full-screen TUI** — `pythinker tui` (alias `chat`) opens a `prompt_toolkit` chat with live streaming, slash-command pickers (`/model`, `/provider`, `/sessions`, `/theme`, `/help`, `/status`), fuzzy search, themable chrome (default + monochrome), and Ctrl+C cancellation of in-flight turns.
 - **Provider-rich** — 25+ LLM providers (Anthropic, OpenAI, Azure OpenAI, OpenAI Codex, GitHub Copilot, Qwen/DashScope, MiniMax, VolcEngine, Moonshot, DeepSeek, StepFun, and more) behind a single interface.
@@ -29,8 +29,9 @@
 - **Governed-execution runtime** *(off by default)* — opt-in `RuntimeConfig` wires a `PolicyService` (allow-lists from agent manifests, per-turn budgets, recursion depth), a `ToolEgressGateway` chokepoint, an `AgentRegistry` directory loader, `RequestContext` + `BudgetCounters` plumbing, and a pluggable `TelemetrySink` (loguru / JSONL / composite). When the loader is `None` and policy is off, the runtime is bit-for-bit identical to the legacy path.
 - **Autonomous subagent tracking** — spawned subagents are first-class task records with durable output under `.pythinker/task-results/`. Pick a role at spawn time — `coder` (full tools), `explore` (read-only navigation), or `plan` (planning-only, no write/edit/shell) — and use `/tasks`, `/task-output <task_id>`, and `/task-stop <task_id>` to inspect or stop background work from chat.
 - **Memory that learns** — a two-phase "Dream" process consolidates long-term memory into `MEMORY.md` / `SOUL.md` / `USER.md`, auto-versioned with pure-Python git.
-- **Skills & MCP** — bundled skills (GitHub, cron, weather, tmux, summarize, skill-creator, …) plus first-class [Model Context Protocol](https://modelcontextprotocol.io/) tool access.
+- **Skills & MCP** — bundled skills (GitHub, cron, weather, tmux, summarize, skill-creator, …) plus first-class [Model Context Protocol](https://modelcontextprotocol.io/) tool access with defensive HTTP probing and provider-safe tool names.
 - **Research-grade PDF reports** — opt-in `make_pdf` tool renders structured Markdown to a styled PDF via ReportLab (`pip install 'pythinker-ai[reports]'`).
+- **Safer channel ingress** — chat/email adapters apply `allowFrom` before costly side effects like media downloads, attachment extraction, or voice transcription; Matrix also drops replayed pre-startup events.
 - **Sandboxed shell** — every command is wrapped in a bubblewrap sandbox on Linux; file tools enforce workspace boundaries.
 - **Hackable** — the Python package is ~58k LOC with zero monolithic orchestration layer. Read it, fork it, extend it.
 
@@ -277,7 +278,7 @@ bun run dev
   <img src="https://cdn.jsdelivr.net/gh/mohamed-elkholy95/Pythinker-ai@main/webui/public/brand/arctecture.webp" alt="Pythinker architecture" width="800">
 </p>
 
-🐍 Pythinker stays lightweight by centering everything around a small agent loop: messages come in from chat apps, the LLM decides when tools are needed, and memory or skills are pulled in only as context instead of becoming a heavy orchestration layer. That keeps the core path readable and easy to extend, while still letting you add channels, tools, memory, and deployment options without turning the system into a monolith.
+🐍 Pythinker stays tiny by centering everything around a tiny agent loop: messages come in from chat apps, the LLM decides when tools are needed, and memory or skills are pulled in only as context instead of becoming a heavy orchestration layer. That keeps the core path readable and easy to extend, while still letting you add channels, tools, memory, and deployment options without turning the system into a monolith.
 
 See [`docs/ARCHITECTURE.md`](https://github.com/mohamed-elkholy95/Pythinker-ai/blob/main/docs/ARCHITECTURE.md) for a forensic walkthrough of the runtime.
 

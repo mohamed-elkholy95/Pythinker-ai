@@ -139,7 +139,7 @@ async def test_group_policy_mention_skips_unmentioned_group_message():
 
 @pytest.mark.asyncio
 async def test_group_policy_mention_accepts_mentioned_group_message():
-    ch = WhatsAppChannel({"enabled": True, "groupPolicy": "mention"}, MagicMock())
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"], "groupPolicy": "mention"}, MagicMock())
     ch._handle_message = AsyncMock()
 
     await ch._handle_bridge_message(
@@ -166,7 +166,7 @@ async def test_group_policy_mention_accepts_mentioned_group_message():
 @pytest.mark.asyncio
 async def test_sender_id_prefers_phone_jid_over_lid():
     """sender_id should resolve to phone number when @s.whatsapp.net JID is present."""
-    ch = WhatsAppChannel({"enabled": True}, MagicMock())
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, MagicMock())
     ch._handle_message = AsyncMock()
 
     await ch._handle_bridge_message(
@@ -187,7 +187,7 @@ async def test_sender_id_prefers_phone_jid_over_lid():
 @pytest.mark.asyncio
 async def test_lid_to_phone_cache_resolves_lid_only_messages():
     """When only LID is present, a cached LID→phone mapping should be used."""
-    ch = WhatsAppChannel({"enabled": True}, MagicMock())
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, MagicMock())
     ch._handle_message = AsyncMock()
 
     # First message: both phone and LID → builds cache
@@ -218,9 +218,31 @@ async def test_lid_to_phone_cache_resolves_lid_only_messages():
 
 
 @pytest.mark.asyncio
+async def test_unauthorized_sender_is_rejected_before_transcription():
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["5550000"]}, MagicMock())
+    ch._handle_message = AsyncMock()
+    ch.transcribe_audio = AsyncMock(return_value="secret")
+
+    await ch._handle_bridge_message(
+        json.dumps({
+            "type": "message",
+            "id": "blocked-voice",
+            "sender": "12345@s.whatsapp.net",
+            "pn": "",
+            "content": "[Voice Message]",
+            "timestamp": 1,
+            "media": ["/tmp/voice.ogg"],
+        })
+    )
+
+    ch.transcribe_audio.assert_not_awaited()
+    ch._handle_message.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_voice_message_transcription_uses_media_path():
     """Voice messages are transcribed when media path is available."""
-    ch = WhatsAppChannel({"enabled": True}, MagicMock())
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, MagicMock())
     ch.transcription_provider = "openai"
     ch.transcription_api_key = "sk-test"
     ch._handle_message = AsyncMock()
@@ -246,7 +268,7 @@ async def test_voice_message_transcription_uses_media_path():
 @pytest.mark.asyncio
 async def test_voice_message_no_media_shows_not_available():
     """Voice messages without media produce a fallback placeholder."""
-    ch = WhatsAppChannel({"enabled": True}, MagicMock())
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, MagicMock())
     ch._handle_message = AsyncMock()
 
     await ch._handle_bridge_message(

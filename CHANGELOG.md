@@ -6,11 +6,45 @@ All notable user-visible changes to Pythinker land here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- WhatsApp voice messages now download bridge-side `audioMessage` media so the
+  Python channel can transcribe them when voice transcription is configured.
+- Added `docs/nanobot-upstream-audit.md`, tracking recent upstream Nanobot
+  fixes that were ported, already present, deferred, or not applicable.
+
 ### Changed
 
+- Project-facing descriptions now use “tiny agent” wording instead of
+  “ultra-lightweight” to match the intended positioning.
 - `web_fetch` now reports common site-side blocks (`401`, `403`, `451`) as
   structured `blockedBySite` tool results and logs them as warnings instead of
   errors.
+- `web_fetch` trims common Markdown/backtick/quote wrappers around URLs before
+  validation, making copied links like `` `"https://example.com"` `` work as
+  expected without loosening SSRF checks.
+- MCP server startup is more defensive: HTTP/SSE servers are TCP-probed before
+  entering MCP transports, servers connect sequentially to avoid anyio cancel
+  scope spin, and MCP-derived tool/resource/prompt names are sanitized for
+  provider API compatibility.
+- OpenAI/Groq voice transcription now retries transient failures and handles
+  malformed provider responses without throwing away the whole channel turn.
+
+### Security
+
+- Telegram, Email, and WhatsApp now apply `allowFrom` checks before inbound
+  side effects such as media downloads, attachment extraction, reactions, and
+  voice transcription.
+- Matrix now ignores pre-startup replay events, stops sync on fatal auth
+  responses, and skips sending blank outbound text messages.
+
+### Fixed
+
+- `reasoningEffort: "none"` now disables provider-specific thinking flags for
+  DashScope, MiniMax, VolcEngine/BytePlus, Xiaomi MiMo, and Kimi thinking
+  models instead of accidentally enabling them.
+- VolcEngine providers now use `max_completion_tokens`, matching providers that
+  reject legacy `max_tokens` for reasoning-capable endpoints.
 
 ## [2.2.0] - 2026-05-06
 

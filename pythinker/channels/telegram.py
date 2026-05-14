@@ -806,6 +806,15 @@ class TelegramChannel(BaseChannel):
             return
         message = update.message
         user = update.effective_user
+        sender_id = self._sender_id(user)
+        if not self.is_allowed(sender_id):
+            logger.warning(
+                "Access denied for sender {} on channel {}. "
+                "Add them to allowFrom list in config to grant access.",
+                sender_id,
+                self.name,
+            )
+            return
         self._remember_thread_context(message)
 
         # Strip @bot_username suffix if present
@@ -817,7 +826,7 @@ class TelegramChannel(BaseChannel):
         content = self._normalize_telegram_command(content)
 
         await self._handle_message(
-            sender_id=self._sender_id(user),
+            sender_id=sender_id,
             chat_id=str(message.chat_id),
             content=content,
             metadata=self._build_message_metadata(message, user),
@@ -833,6 +842,14 @@ class TelegramChannel(BaseChannel):
         user = update.effective_user
         chat_id = message.chat_id
         sender_id = self._sender_id(user)
+        if not self.is_allowed(sender_id):
+            logger.warning(
+                "Access denied for sender {} on channel {}. "
+                "Add them to allowFrom list in config to grant access.",
+                sender_id,
+                self.name,
+            )
+            return
         self._remember_thread_context(message)
 
         # Store chat_id for replies

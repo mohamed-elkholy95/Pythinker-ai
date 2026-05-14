@@ -164,8 +164,7 @@ for reliable encryption, password login is recommended instead. If the
 | `e2eeEnabled` | E2EE support (default `true`). Set `false` for plaintext-only. |
 | `maxMediaBytes` | Max attachment size (default `20MB`). Set `0` to block all media. |
 
-
-
+Matrix ignores timeline events older than the channel startup time to avoid replaying old rooms after reconnects, and fatal auth responses stop the sync loop so bad credentials do not spin forever.
 
 **4. Run**
 
@@ -209,6 +208,8 @@ pythinker channels login whatsapp
 # Terminal 2
 pythinker gateway
 ```
+
+Voice/audio messages are downloaded by the bridge and passed to the Python channel for transcription when `transcriptionProvider` and the matching API key are configured.
 
 > WhatsApp bridge updates are not applied automatically for existing installations.
 > After upgrading pythinker, rebuild the local bridge with:
@@ -275,7 +276,7 @@ Give pythinker its own email account. It polls **IMAP** for incoming mail and re
 **2. Configure**
 
 > - `consentGranted` must be `true` to allow mailbox access. This is a safety gate — set `false` to fully disable.
-> - `allowFrom`: Add your email address. Use `["*"]` to accept emails from anyone.
+> - `allowFrom`: Add your email address. Use `["*"]` to accept emails from anyone. The allowlist is checked before attachment extraction or other inbound side effects.
 > - `smtpUseTls` and `smtpUseSsl` default to `true` / `false` respectively, which is correct for Gmail (port 587 + STARTTLS). No need to set them explicitly.
 > - Set `"autoReplyEnabled": false` if you only want to read/analyze emails without sending automatic replies.
 > - `allowedAttachmentTypes`: Save inbound attachments matching these MIME types — `["*"]` for all, e.g. `["application/pdf", "image/*"]` (default `[]` = disabled).

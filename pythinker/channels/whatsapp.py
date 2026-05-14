@@ -221,13 +221,6 @@ class WhatsAppChannel(BaseChannel):
             content = data.get("content", "")
             message_id = data.get("id", "")
 
-            if message_id:
-                if message_id in self._processed_message_ids:
-                    return
-                self._processed_message_ids[message_id] = None
-                while len(self._processed_message_ids) > 1000:
-                    self._processed_message_ids.popitem(last=False)
-
             # Extract just the phone number or lid as chat_id
             is_group = data.get("isGroup", False)
             was_mentioned = data.get("wasMentioned", False)
@@ -256,6 +249,22 @@ class WhatsAppChannel(BaseChannel):
             if phone_id and lid_id:
                 self._lid_to_phone[lid_id] = phone_id
             sender_id = phone_id or self._lid_to_phone.get(lid_id, "") or lid_id or id_a or id_b
+
+            if not self.is_allowed(sender_id):
+                logger.warning(
+                    "Access denied for sender {} on channel {}. "
+                    "Add them to allowFrom list in config to grant access.",
+                    sender_id,
+                    self.name,
+                )
+                return
+
+            if message_id:
+                if message_id in self._processed_message_ids:
+                    return
+                self._processed_message_ids[message_id] = None
+                while len(self._processed_message_ids) > 1000:
+                    self._processed_message_ids.popitem(last=False)
 
             logger.info("Sender phone={} lid={} → sender_id={}", phone_id or "(empty)", lid_id or "(empty)", sender_id)
 

@@ -857,6 +857,42 @@ async def test_on_media_message_handles_decrypt_error(monkeypatch, tmp_path) -> 
     assert "[attachment: secret.txt - download failed]" in handled[0]["content"]
 
 
+def test_should_process_message_skips_pre_startup_events() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    channel._started_at_ms = 1_000
+    room = SimpleNamespace(room_id="!room:matrix.org", member_count=1)
+    event = SimpleNamespace(sender="@alice:matrix.org", server_timestamp=999)
+
+    assert channel._should_process_message(room, event) is False
+
+
+@pytest.mark.asyncio
+async def test_sync_error_stops_loop_on_fatal_auth() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    channel._running = True
+
+    await channel._on_sync_error(SimpleNamespace(status_code="M_UNKNOWN_TOKEN"))
+
+    assert channel._running is False
+    assert client.stop_sync_forever_called is True
+
+
+@pytest.mark.asyncio
+async def test_send_skips_empty_text_without_media() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    await channel.send(
+        OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content="   ")
+    )
+
+    assert client.room_send_calls == []
+    assert client.typing_calls[-1] == ("!room:matrix.org", False, TYPING_NOTICE_TIMEOUT_MS)
+
+
 @pytest.mark.asyncio
 async def test_send_clears_typing_after_send() -> None:
     channel = MatrixChannel(_make_config(), MessageBus())

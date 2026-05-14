@@ -244,6 +244,7 @@ class MatrixChannel(BaseChannel):
         self._server_upload_limit_bytes: int | None = None
         self._server_upload_limit_checked = False
         self._stream_bufs: dict[str, _StreamBuf] = {}
+        self._started_at_ms = 0
 
 
     async def start(self) -> None:
@@ -311,6 +312,7 @@ class MatrixChannel(BaseChannel):
             logger.warning("Unable to load a Matrix session due to missing password, access_token, or device_id; encryption may not work")
             return
 
+        self._started_at_ms = int(time.time() * 1000)
         self._sync_task = asyncio.create_task(self._sync_loop())
 
     async def stop(self) -> None:
@@ -508,7 +510,7 @@ class MatrixChannel(BaseChannel):
                         failures.append(fail)
             if failures:
                 text = f"{text.rstrip()}\n{chr(10).join(failures)}" if text.strip() else "\n".join(failures)
-            if text or not candidates:
+            if text.strip():
                 content = _build_matrix_text_content(text)
                 if relates_to:
                     content["m.relates_to"] = relates_to
@@ -574,15 +576,24 @@ class MatrixChannel(BaseChannel):
         self.client.add_response_callback(self._on_join_error, JoinError)
         self.client.add_response_callback(self._on_send_error, RoomSendError)
 
+    def _is_fatal_auth_error(self, response: Any) -> bool:
+        code = getattr(response, "status_code", None)
+        return code in {"M_UNKNOWN_TOKEN", "M_FORBIDDEN", "M_UNAUTHORIZED"} or bool(
+            getattr(response, "soft_logout", False)
+        )
+
     def _log_response_error(self, label: str, response: Any) -> None:
         """Log Matrix response errors — auth errors at ERROR level, rest at WARNING."""
-        code = getattr(response, "status_code", None)
-        is_auth = code in {"M_UNKNOWN_TOKEN", "M_FORBIDDEN", "M_UNAUTHORIZED"}
-        is_fatal = is_auth or getattr(response, "soft_logout", False)
+        is_fatal = self._is_fatal_auth_error(response)
         (logger.error if is_fatal else logger.warning)("Matrix {} failed: {}", label, response)
 
     async def _on_sync_error(self, response: SyncError) -> None:
         self._log_response_error("sync", response)
+        if self._is_fatal_auth_error(response):
+            logger.error("Matrix sync hit a fatal authentication error; stopping sync loop")
+            self._running = False
+            if self.client:
+                self.client.stop_sync_forever()
 
     async def _on_join_error(self, response: JoinError) -> None:
         self._log_response_error("join", response)
@@ -659,8 +670,16 @@ class MatrixChannel(BaseChannel):
             return True
         return bool(self.config.allow_room_mentions and mentions.get("room") is True)
 
+    def _is_pre_startup_event(self, event: RoomMessage) -> bool:
+        if not self._started_at_ms:
+            return False
+        timestamp = getattr(event, "server_timestamp", None)
+        return isinstance(timestamp, int) and timestamp < self._started_at_ms
+
     def _should_process_message(self, room: MatrixRoom, event: RoomMessage) -> bool:
         """Apply sender and room policy checks."""
+        if self._is_pre_startup_event(event):
+            return False
         if not self.is_allowed(event.sender):
             return False
         if self._is_direct_room(room):

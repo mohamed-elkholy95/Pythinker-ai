@@ -23,6 +23,7 @@ def _make_config(**overrides) -> EmailConfig:
         smtp_username="bot@example.com",
         smtp_password="secret",
         mark_seen=True,
+        allow_from=["*"],
         # Disable auth verification by default so existing tests are unaffected
         verify_dkim=False,
         verify_spf=False,

@@ -13,6 +13,8 @@ from pythinker.agent.tools.mcp import (
     MCPResourceWrapper,
     MCPToolWrapper,
     _normalize_windows_stdio_command,
+    _probe_http_url,
+    _sanitize_name,
     connect_mcp_servers,
 )
 from pythinker.agent.tools.registry import ToolRegistry
@@ -117,6 +119,38 @@ def _make_wrapper(session: object, *, timeout: float = 0.1) -> MCPToolWrapper:
     return MCPToolWrapper(session, "test", tool_def, tool_timeout=timeout)
 
 
+def test_sanitize_name_replaces_provider_unsafe_characters() -> None:
+    assert _sanitize_name("mcp_my.server_search docs:v1") == "mcp_my_server_search_docs_v1"
+
+
+def test_wrapper_sanitizes_tool_name() -> None:
+    tool_def = SimpleNamespace(
+        name="search.docs/v1",
+        description="demo tool",
+        inputSchema={"type": "object", "properties": {}},
+    )
+
+    wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "my.server", tool_def)
+
+    assert wrapper.name == "mcp_my_server_search_docs_v1"
+
+
+def test_resource_and_prompt_wrappers_sanitize_names() -> None:
+    resource = MCPResourceWrapper(
+        SimpleNamespace(read_resource=None),
+        "my.server",
+        SimpleNamespace(name="docs v1", uri="file:///docs", description="docs"),
+    )
+    prompt = MCPPromptWrapper(
+        SimpleNamespace(get_prompt=None),
+        "my.server",
+        SimpleNamespace(name="plan/v1", description="plan", arguments=None),
+    )
+
+    assert resource.name == "mcp_my_server_resource_docs_v1"
+    assert prompt.name == "mcp_my_server_prompt_plan_v1"
+
+
 def test_wrapper_preserves_non_nullable_unions() -> None:
     tool_def = SimpleNamespace(
         name="demo",
@@ -178,6 +212,36 @@ def test_wrapper_normalizes_nullable_property_anyof() -> None:
         "description": "optional name",
         "nullable": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_probe_http_url_returns_false_for_unreachable_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _raise_connection_error(host: str, port: int):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(mcp_mod.asyncio, "open_connection", _raise_connection_error)
+
+    assert await _probe_http_url("http://127.0.0.1:8765/mcp", timeout=0.01) is False
+
+
+@pytest.mark.asyncio
+async def test_connect_skips_unreachable_http_mcp_server(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(tool_names=["tool_a"])
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", lambda url: asyncio.sleep(0, result=False))
+
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(type="streamableHttp", url="http://127.0.0.1:8765/mcp")},
+        registry,
+    )
+
+    assert stacks == {}
+    assert "mcp_test_tool_a" not in registry.tool_names
 
 
 def test_normalize_windows_stdio_command_is_noop_off_windows(
@@ -776,6 +840,24 @@ def _make_fake_session_with_capabilities(
         list_resources=list_resources,
         list_prompts=list_prompts,
     )
+
+
+@pytest.mark.asyncio
+async def test_connect_accepts_sanitized_enabled_tool_name(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
+        tool_names=["tool.with space"]
+    )
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test.server": MCPServerConfig(command="fake", enabled_tools=["mcp_test_server_tool_with_space"])},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert "mcp_test_server_tool_with_space" in registry.tool_names
 
 
 @pytest.mark.asyncio

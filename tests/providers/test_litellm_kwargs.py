@@ -744,6 +744,11 @@ def test_dashscope_thinking_disabled_for_minimum_alias() -> None:
     assert kw["extra_body"] == {"enable_thinking": False}
 
 
+def test_dashscope_thinking_disabled_for_none() -> None:
+    kw = _build_kwargs_for("dashscope", "qwen3-plus", reasoning_effort="none")
+    assert kw["extra_body"] == {"enable_thinking": False}
+
+
 def test_non_dashscope_minimal_not_retranslated() -> None:
     """DashScope-specific translation must not leak to other providers."""
     kw = _build_kwargs_for("openai", "gpt-5", reasoning_effort="minimal")
@@ -765,6 +770,11 @@ def test_minimax_reasoning_split_disabled_for_minimal() -> None:
     assert kw["extra_body"] == {"reasoning_split": False}
 
 
+def test_minimax_reasoning_split_disabled_for_none() -> None:
+    kw = _build_kwargs_for("minimax", "MiniMax-M2.7", reasoning_effort="none")
+    assert kw["extra_body"] == {"reasoning_split": False}
+
+
 def test_minimax_no_extra_body_when_reasoning_effort_none() -> None:
     kw = _build_kwargs_for("minimax", "MiniMax-M2.7", reasoning_effort=None)
     assert "extra_body" not in kw
@@ -773,6 +783,17 @@ def test_minimax_no_extra_body_when_reasoning_effort_none() -> None:
 def test_volcengine_thinking_enabled() -> None:
     kw = _build_kwargs_for("volcengine", "doubao-seed-2-0-pro", reasoning_effort="high")
     assert kw["extra_body"] == {"thinking": {"type": "enabled"}}
+
+
+def test_volcengine_uses_max_completion_tokens() -> None:
+    kw = _build_kwargs_for("volcengine", "doubao-seed-2-0-pro", reasoning_effort=None)
+    assert kw["max_completion_tokens"] == 1024
+    assert "max_tokens" not in kw
+
+
+def test_xiaomi_mimo_thinking_disabled_for_none() -> None:
+    kw = _build_kwargs_for("xiaomi_mimo", "MiMo-VL-7B-RL", reasoning_effort="none")
+    assert kw["extra_body"] == {"thinking": {"type": "disabled"}}
 
 
 def test_byteplus_thinking_disabled_for_minimal() -> None:
@@ -800,6 +821,11 @@ def test_kimi_k25_thinking_enabled() -> None:
 def test_kimi_k25_thinking_disabled_for_minimal() -> None:
     """reasoning_effort='minimal' maps to thinking disabled for kimi-k2.5."""
     kw = _build_kwargs_for("moonshot", "kimi-k2.5", reasoning_effort="minimal")
+    assert kw.get("extra_body") == {"thinking": {"type": "disabled"}}
+
+
+def test_kimi_k25_thinking_disabled_for_none() -> None:
+    kw = _build_kwargs_for("moonshot", "kimi-k2.5", reasoning_effort="none")
     assert kw.get("extra_body") == {"thinking": {"type": "disabled"}}
 
 

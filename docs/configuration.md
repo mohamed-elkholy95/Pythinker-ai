@@ -119,7 +119,7 @@ The Workbench also includes operational checks for local administrators:
 ## Providers
 
 > [!TIP]
-> - **Voice transcription**: Voice messages (Telegram, WhatsApp) are automatically transcribed using Whisper. By default Groq is used (free tier). Set `"transcriptionProvider": "openai"` under `channels` to use OpenAI Whisper instead, and optionally set `"transcriptionLanguage": "en"` (or another ISO-639-1 code) for more accurate transcription. The API key is picked from the matching provider config.
+> - **Voice transcription**: Voice messages (Telegram, WhatsApp) are automatically transcribed using Whisper. By default Groq is used (free tier). Set `"transcriptionProvider": "openai"` under `channels` to use OpenAI Whisper instead, and optionally set `"transcriptionLanguage": "en"` (or another ISO-639-1 code) for more accurate transcription. The API key is picked from the matching provider config. Transient transcription failures are retried; invalid credentials and other permanent errors fail fast.
 > - **MiniMax Coding Plan**: Exclusive discount links for the pythinker community: [Overseas](https://platform.minimax.io/subscribe/coding-plan?code=9txpdXw04g&source=link) · [Mainland China](https://platform.minimaxi.com/subscribe/token-plan?code=GILTJpMTqZ&source=link)
 > - **MiniMax wizard**: Run `pythinker onboard`, pick `[P] LLM Provider` → `MiniMax`. The wizard asks region (Global / Mainland China), opens the [token plan portal](https://platform.minimax.io/user-center/payment/token-plan) in your browser, and lets you pick **endpoint flavor** (`OpenAI-compatible` / `Anthropic-compatible` / **Both — recommended**) and **plan tier** (Standard → `MiniMax-M2.7` / Highspeed → `MiniMax-M2.7-highspeed`). Pick `Both` to wire `providers.minimax` *and* `providers.minimax_anthropic` with the same key.
 > - **MiniMax thinking modes**: `providers.minimax` supports thinking via `reasoningEffort` — pythinker injects `extra_body={"reasoning_split": true}` automatically (`pythinker/providers/openai_compat_provider.py:415`). `providers.minimax_anthropic` exposes **native Anthropic thinking blocks** (visible reasoning content in the response). Pick `Both` in the wizard to keep either mode reachable at runtime.
@@ -779,7 +779,7 @@ Use `enabledTools` to register only a subset of tools from an MCP server:
 }
 ```
 
-`enabledTools` accepts either the raw MCP tool name (for example `read_file`) or the wrapped pythinker tool name (for example `mcp_filesystem_write_file`).
+`enabledTools` accepts either the raw MCP tool name (for example `read_file`) or the wrapped pythinker tool name (for example `mcp_filesystem_write_file`). Wrapped MCP names are sanitized to provider-safe characters (`A-Z`, `a-z`, `0-9`, `_`, `-`); spaces, dots, slashes, and other punctuation become `_`.
 
 - Omit `enabledTools`, or set it to `["*"]`, to register all tools.
 - Set `enabledTools` to `[]` to register no tools from that server.

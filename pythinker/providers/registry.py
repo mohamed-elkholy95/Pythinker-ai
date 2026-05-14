@@ -186,6 +186,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_gateway=True,
         detect_by_base_keyword="volces",
         default_api_base="https://ark.cn-beijing.volces.com/api/v3",
+        supports_max_completion_tokens=True,
     ),
     # VolcEngine Coding Plan: same key as volcengine
     ProviderSpec(
@@ -197,6 +198,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_gateway=True,
         default_api_base="https://ark.cn-beijing.volces.com/api/coding/v3",
         strip_model_prefix=True,
+        supports_max_completion_tokens=True,
     ),
     # BytePlus: VolcEngine international, pay-per-use models
     ProviderSpec(

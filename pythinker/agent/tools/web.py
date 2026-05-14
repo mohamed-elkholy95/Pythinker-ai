@@ -319,6 +319,7 @@ class WebFetchTool(Tool):
 
     async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> Any:  # noqa: N803  -- camelCase matches the JSON tool schema exposed to the LLM
         max_chars = maxChars or self.max_chars
+        url = url.strip(" \t\r\n`\"'")
         is_valid, error_msg = _validate_url_safe(url)
         if not is_valid:
             return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)

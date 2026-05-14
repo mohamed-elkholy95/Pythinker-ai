@@ -369,7 +369,7 @@ class OpenAICompatProvider(LLMProvider):
         # Only sent when reasoning_effort is explicitly configured so that
         # the provider default is preserved otherwise.
         if spec and reasoning_effort is not None:
-            thinking_enabled = semantic_effort != "minimal"
+            thinking_enabled = semantic_effort not in {"minimal", "none"}
             extra: dict[str, Any] | None = None
             if spec.name == "dashscope":
                 extra = {"enable_thinking": thinking_enabled}
@@ -377,7 +377,7 @@ class OpenAICompatProvider(LLMProvider):
                 extra = {"reasoning_split": thinking_enabled}
             elif spec.name in (
                 "volcengine", "volcengine_coding_plan",
-                "byteplus", "byteplus_coding_plan",
+                "byteplus", "byteplus_coding_plan", "xiaomi_mimo",
             ):
                 extra = {
                     "thinking": {"type": "enabled" if thinking_enabled else "disabled"}
@@ -390,7 +390,7 @@ class OpenAICompatProvider(LLMProvider):
         # so that OpenRouter-style names like "moonshotai/kimi-k2.5" are handled
         # identically to bare names like "kimi-k2.5".
         if reasoning_effort is not None and _is_kimi_thinking_model(model_name):
-            thinking_enabled = semantic_effort != "minimal"
+            thinking_enabled = semantic_effort not in {"minimal", "none"}
             kwargs.setdefault("extra_body", {}).update(
                 {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
             )

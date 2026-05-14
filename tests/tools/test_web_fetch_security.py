@@ -21,6 +21,37 @@ def _fake_resolve_public(hostname, port, family=0, type_=0):
 
 
 @pytest.mark.asyncio
+async def test_web_fetch_strips_markdown_url_wrappers(monkeypatch):
+    tool = WebFetchTool()
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, method, url, headers=None):
+            raise RuntimeError("skip image preflight")
+
+    async def _fake_fetch_jina(url: str, max_chars: int) -> str:
+        captured["url"] = url
+        return json.dumps({"url": url, "text": "ok"})
+
+    monkeypatch.setattr("pythinker.agent.tools.web.httpx.AsyncClient", FakeClient)
+    monkeypatch.setattr(tool, "_fetch_jina", _fake_fetch_jina)
+    with patch("pythinker.security.network.socket.getaddrinfo", _fake_resolve_public):
+        result = await tool.execute(url=" `\"https://example.com/page\"` ")
+
+    assert captured["url"] == "https://example.com/page"
+    assert json.loads(result)["url"] == "https://example.com/page"
+
+
+@pytest.mark.asyncio
 async def test_web_fetch_blocks_private_ip():
     tool = WebFetchTool()
     with patch("pythinker.security.network.socket.getaddrinfo", _fake_resolve_private):

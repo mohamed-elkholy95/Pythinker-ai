@@ -764,22 +764,18 @@ class AgentLoop:
                 return []
 
             def _to_user_message(pending_msg: InboundMessage) -> dict[str, Any]:
+                # Runtime context (time/channel/sender) is already prepended to
+                # the turn's initial user message by ContextBuilder.build_messages.
+                # Re-injecting it on every drained pending message duplicates a
+                # ~hundreds-of-bytes block per follow-up, wastes tokens, and
+                # invalidates the prompt-cache prefix.
                 content = pending_msg.content
                 media = pending_msg.media if pending_msg.media else None
                 if media:
                     content, media = extract_documents(content, media)
                     media = media or None
                 user_content = self.context._build_user_content(content, media)
-                runtime_ctx = self.context._build_runtime_context(
-                    pending_msg.channel,
-                    pending_msg.chat_id,
-                    self.context.timezone,
-                )
-                if isinstance(user_content, str):
-                    merged: str | list[dict[str, Any]] = f"{runtime_ctx}\n\n{user_content}"
-                else:
-                    merged = [{"type": "text", "text": runtime_ctx}] + user_content
-                return {"role": "user", "content": merged}
+                return {"role": "user", "content": user_content}
 
             items: list[dict[str, Any]] = []
             while len(items) < limit:

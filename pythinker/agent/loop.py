@@ -18,6 +18,7 @@ from pythinker.agent import loop_context, loop_reload, loop_tools
 from pythinker.agent.autocompact import AutoCompact
 from pythinker.agent.checkpoint import CheckpointManager
 from pythinker.agent.context import ContextBuilder
+from pythinker.agent.turn_writer import TurnWriter
 from pythinker.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from pythinker.agent.memory import Consolidator, Dream
 from pythinker.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
@@ -36,8 +37,6 @@ from pythinker.runtime.egress import ToolEgressGateway
 from pythinker.runtime.policy import PolicyService
 from pythinker.session.manager import Session, SessionManager
 from pythinker.utils.document import extract_documents
-from pythinker.utils.helpers import image_placeholder_text
-from pythinker.utils.helpers import truncate_text as truncate_text_fn
 from pythinker.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 if TYPE_CHECKING:
@@ -290,6 +289,7 @@ class AgentLoop:
             cache_max=self._session_cache_max,
         )
         self.checkpoint = CheckpointManager(sessions=self.sessions)
+        self.turn_writer = TurnWriter(max_tool_result_chars=self.max_tool_result_chars)
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
         self.task_store = TaskStore(self.workspace)
@@ -1409,6 +1409,10 @@ class AgentLoop:
             metadata=meta,
         )
 
+    # Thin backwards-compat delegates so existing tests that call
+    # loop._save_turn / loop._sanitize_persisted_blocks / loop._persist_subagent_followup
+    # keep working unchanged. New code should call self.turn_writer.X directly.
+
     def _sanitize_persisted_blocks(
         self,
         content: list[dict[str, Any]],
@@ -1416,107 +1420,17 @@ class AgentLoop:
         should_truncate_text: bool = False,
         drop_runtime: bool = False,
     ) -> list[dict[str, Any]]:
-        """Strip volatile multimodal payloads before writing session history."""
-        filtered: list[dict[str, Any]] = []
-        for block in content:
-            if not isinstance(block, dict):
-                filtered.append(block)
-                continue
-
-            if (
-                drop_runtime
-                and block.get("type") == "text"
-                and isinstance(block.get("text"), str)
-                and block["text"].startswith(ContextBuilder._RUNTIME_CONTEXT_TAG)
-            ):
-                continue
-
-            if block.get("type") == "image_url" and block.get("image_url", {}).get(
-                "url", ""
-            ).startswith("data:image/"):
-                path = (block.get("_meta") or {}).get("path", "")
-                filtered.append({"type": "text", "text": image_placeholder_text(path)})
-                continue
-
-            if block.get("type") == "text" and isinstance(block.get("text"), str):
-                text = block["text"]
-                if should_truncate_text and len(text) > self.max_tool_result_chars:
-                    text = truncate_text_fn(text, self.max_tool_result_chars)
-                filtered.append({**block, "text": text})
-                continue
-
-            filtered.append(block)
-
-        return filtered
+        return self.turn_writer.sanitize_persisted_blocks(
+            content,
+            should_truncate_text=should_truncate_text,
+            drop_runtime=drop_runtime,
+        )
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
-        """Save new-turn messages into session, truncating large tool results."""
-        from datetime import datetime
-
-        for m in messages[skip:]:
-            entry = dict(m)
-            role, content = entry.get("role"), entry.get("content")
-            if role == "assistant" and not content and not entry.get("tool_calls"):
-                continue  # skip empty assistant messages — they poison session context
-            if role == "tool":
-                if isinstance(content, str) and len(content) > self.max_tool_result_chars:
-                    entry["content"] = truncate_text_fn(content, self.max_tool_result_chars)
-                elif isinstance(content, list):
-                    filtered = self._sanitize_persisted_blocks(content, should_truncate_text=True)
-                    if not filtered:
-                        continue
-                    entry["content"] = filtered
-            elif role == "user":
-                if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
-                    # Strip the entire runtime-context block (including any session summary).
-                    # The block is bounded by _RUNTIME_CONTEXT_TAG and _RUNTIME_CONTEXT_END.
-                    end_marker = ContextBuilder._RUNTIME_CONTEXT_END
-                    end_pos = content.find(end_marker)
-                    if end_pos >= 0:
-                        after = content[end_pos + len(end_marker):].lstrip("\n")
-                        if after:
-                            entry["content"] = after
-                        else:
-                            continue
-                    else:
-                        # Fallback: no end marker found, strip the tag prefix
-                        after_tag = content[len(ContextBuilder._RUNTIME_CONTEXT_TAG):].lstrip("\n")
-                        if after_tag.strip():
-                            entry["content"] = after_tag
-                        else:
-                            continue
-                if isinstance(content, list):
-                    filtered = self._sanitize_persisted_blocks(content, drop_runtime=True)
-                    if not filtered:
-                        continue
-                    entry["content"] = filtered
-            entry.setdefault("timestamp", datetime.now().isoformat())
-            session.messages.append(entry)
-        session.updated_at = datetime.now()
+        self.turn_writer.save_turn(session, messages, skip)
 
     def _persist_subagent_followup(self, session: Session, msg: InboundMessage) -> bool:
-        """Persist subagent follow-ups before prompt assembly so history stays durable.
-
-        Returns True if a new entry was appended; False if the follow-up was
-        deduped (same ``subagent_task_id`` already in session) or carries no
-        content worth persisting.
-        """
-        if not msg.content:
-            return False
-        task_id = msg.metadata.get("subagent_task_id") if isinstance(msg.metadata, dict) else None
-        if task_id and any(
-            m.get("injected_event") == "subagent_result" and m.get("subagent_task_id") == task_id
-            for m in session.messages
-        ):
-            return False
-        session.add_message(
-            "assistant",
-            msg.content,
-            sender_id=msg.sender_id,
-            injected_event="subagent_result",
-            subagent_task_id=task_id,
-        )
-        return True
+        return self.turn_writer.persist_subagent_followup(session, msg)
 
     # Thin backwards-compat delegates so external callers (e.g.
     # pythinker/channels/websocket/channel.py) and existing test patches that

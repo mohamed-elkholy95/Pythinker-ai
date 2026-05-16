@@ -16,10 +16,12 @@ def _mk_loop() -> AgentLoop:
     from pythinker.config.schema import AgentDefaults
 
     loop.max_tool_result_chars = AgentDefaults().max_tool_result_chars
-    # Test bypasses __init__, but checkpoint delegates need this attribute.
+    # Test bypasses __init__, but checkpoint + turn_writer delegates need these attrs.
     from pythinker.agent.checkpoint import CheckpointManager
+    from pythinker.agent.turn_writer import TurnWriter
     loop.sessions = MagicMock()
     loop.checkpoint = CheckpointManager(sessions=loop.sessions)
+    loop.turn_writer = TurnWriter(max_tool_result_chars=loop.max_tool_result_chars)
     return loop
 
 

@@ -7,6 +7,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
+
 class MetadataSource(StrEnum):
     OFFICIAL_DOCS = "official_docs"
     PROVIDER_API = "provider_api"
@@ -36,62 +37,56 @@ class ModelMetadata:
     confidence: Literal["official", "provider_api", "curated", "fallback"] = "curated"
     is_alias: bool = False
 
-_PROVIDER_PREFIXES = {
-    "anthropic", "azure_openai", "gemini", "github_copilot", "openai", "openai_codex",
-}
-
-
+_PROVIDER_PREFIXES = {"anthropic", "azure_openai", "gemini", "github_copilot", "openai", "openai_codex"}
 def _metadata_from_row(row: dict[str, Any], *, alias: bool = False) -> ModelMetadata:
     data = dict(row)
     data["aliases"] = tuple(data.get("aliases") or ())
     data["source"] = MetadataSource(data.get("source", MetadataSource.CURATED.value))
     data["is_alias"] = alias or bool(data.get("is_alias", False))
     return ModelMetadata(**data)
-
-
 def _load_profiles() -> tuple[ModelMetadata, ...]:
     path = Path(__file__).with_name("model_profiles.json")
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    return tuple(_metadata_from_row(row) for row in raw.get("models", []))
+    return tuple(_metadata_from_row(r) for r in json.loads(path.read_text()).get("models", []))
 
 _PROFILES = _load_profiles()
 _CURATED = {(m.provider, m.model_id.lower()): m for m in _PROFILES}
-_ALIASES = {
-    (m.provider, alias.lower()): _metadata_from_row(m.__dict__, alias=True)
-    for m in _PROFILES
-    for alias in m.aliases
-}
-
-
+_ALIASES = {(m.provider, a.lower()): _metadata_from_row(m.__dict__, alias=True) for m in _PROFILES for a in m.aliases}
 def resolve_model_alias(model: str) -> str:
-    """Return the canonical model id for a known alias, otherwise the input."""
     meta = get_model_metadata(model)
     return meta.model_id if meta and meta.is_alias else model
-
-
 def _candidate_keys(model: str) -> list[tuple[str | None, str]]:
     parts = model.split("/", 1)
     if len(parts) == 1:
         return [(None, model)]
     provider = parts[0].replace("-", "_").lower()
-    rest = parts[1]
     keys: list[tuple[str | None, str]] = []
     if provider in _PROVIDER_PREFIXES:
-        keys.append((provider, rest))
-    keys.extend([(parts[0].lower(), rest), (None, rest)])
-    return keys
-
-
-def get_model_metadata(model: str, *, config: Any | None = None) -> ModelMetadata | None:
-    """Look up static metadata for a provider-qualified or bare model id."""
-    del config  # Config override support is added in the next task.
+        keys.append((provider, parts[1]))
+    return keys + [(parts[0].lower(), parts[1]), (None, parts[1])]
+def _override_metadata(model: str, override: Any) -> ModelMetadata:
+    data = override.model_dump(exclude_none=True) if hasattr(override, "model_dump") else dict(override)
+    data.setdefault("provider", model.split("/", 1)[0].replace("-", "_") if "/" in model else "custom")
+    data.setdefault("model_id", model.split("/", 1)[-1])
+    data.update(source=MetadataSource.USER_OVERRIDE, confidence="official")
+    return _metadata_from_row(data)
+def _lookup_curated(model: str) -> ModelMetadata | None:
     for provider, canonical in _candidate_keys(model):
-        lowered = canonical.lower()
-        provider_keys = [provider] if provider else [p for p, _ in _CURATED]
-        for candidate_provider in provider_keys:
-            key = (candidate_provider, lowered)
+        for candidate_provider in ([provider] if provider else [p for p, _ in _CURATED]):
+            key = (candidate_provider, canonical.lower())
             if key in _CURATED:
                 return _CURATED[key]
             if key in _ALIASES:
                 return _ALIASES[key]
     return None
+def get_model_metadata(model: str, *, config: Any | None = None) -> ModelMetadata | None:
+    models = getattr(config, "models", None)
+    overrides = getattr(models, "overrides", {}) if models is not None else {}
+    if model in overrides:
+        return _override_metadata(model, overrides[model])
+    azure = getattr(models, "azure_deployments", {}) if models is not None else {}
+    if "/" in model and model.split("/", 1)[0].replace("-", "_") == "azure_openai":
+        deployment = model.split("/", 1)[1]
+        if deployment in azure:
+            base = azure[deployment]
+            return _override_metadata(base, overrides[base]) if base in overrides else _lookup_curated(f"openai_codex/{base}") or _lookup_curated(f"openai/{base}")
+    return _lookup_curated(model)

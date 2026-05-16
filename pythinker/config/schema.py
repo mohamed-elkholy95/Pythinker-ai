@@ -391,12 +391,39 @@ class RuntimeConfig(Base):
     blocked_senders: list[str] = Field(default_factory=list)
 
 
+class ModelMetadataOverride(Base):
+    """User-supplied model metadata override."""
+
+    provider: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    input_tokens: int | None = None
+    max_output_tokens: int | None = None
+    total_context_tokens: int | None = None
+    encoding: str | None = None
+    supports_tools: bool | None = None
+    supports_vision: bool | None = None
+    supports_json_schema: bool | None = None
+    supports_reasoning: bool | None = None
+    preferred_api: str | None = None
+
+
+class ModelsConfig(Base):
+    """Global model metadata settings."""
+
+    metadata_mode: Literal["off", "auto", "static", "online"] = "auto"
+    metadata_cache_ttl_hours: int = 168
+    allow_online_metadata_refresh: bool = False
+    overrides: dict[str, ModelMetadataOverride] = Field(default_factory=dict)
+    azure_deployments: dict[str, str] = Field(default_factory=dict)
+
+
 class Config(BaseSettings):
     """Root configuration for pythinker."""
 
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    models: ModelsConfig = Field(default_factory=ModelsConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)

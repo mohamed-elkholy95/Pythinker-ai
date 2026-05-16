@@ -10,7 +10,6 @@
     <a href="https://pepy.tech/projects/pythinker-ai"><img src="https://img.shields.io/pepy/dt/pythinker-ai?label=downloads&color=%2312b76a&cacheSeconds=600" alt="Downloads"></a>
     <img src="https://img.shields.io/badge/python-%E2%89%A53.11-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-    <img src="https://visitor-badge.laobi.icu/badge?page_id=mohamed-elkholy95.Pythinker-ai" alt="Visitors">
   </p>
 </div>
 
@@ -342,4 +341,8 @@ Pythinker is released under the [MIT License](https://github.com/mohamed-elkholy
 
 <p align="center">
   <em>Thanks for visiting ✨ Pythinker!</em>
+</p>
+
+<p align="center">
+  <img src="https://visitor-badge.laobi.icu/badge?page_id=mohamed-elkholy95.Pythinker-ai" alt="Visitors">
 </p>

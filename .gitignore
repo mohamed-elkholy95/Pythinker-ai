@@ -45,9 +45,13 @@ dmypy.json
 .nox/
 .hypothesis/
 
-# Local Claude Code session notes
+# Local agent overlays (Claude / Codex / OpenCode / Pi)
 CLAUDE.local.md
+AGENTS.override.md
 tasks/
+
+# Local OpenCode plugin config (per-machine, installed by `graphify install --platform opencode`)
+.opencode/
 
 # Build & packaging
 dist/

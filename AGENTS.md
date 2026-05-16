@@ -36,8 +36,6 @@ over speculative abstractions.
   chat-platform quirks live in channel adapters. Add core seams only when multiple owners need them.
 - **Do not modify git config, skip hooks, force-push, reset hard, or delete branches/worktrees**
   unless the user explicitly asks and confirms the destructive action.
-- **Never add AI co-author/tool trailers** to commits, PRs, changelog entries, release notes, or
-  generated messages.
 - **Ask before releases, version bumps, dependency additions, dependency pin changes, or patch
   overrides.** These require explicit maintainer approval.
 
@@ -185,8 +183,9 @@ Read these before changing their behavior:
 - `webui/`: React 18 + TypeScript + Vite frontend.
 - `bridge/`: Node/Baileys WhatsApp relay; Python owns business logic.
 - `.agents/skills/`: maintainer workflow skills; not loaded by runtime agents.
-- `bridge/AGENTS.md` and `webui/AGENTS.md`: scoped subtree rules; root rules still apply.
-- `CLAUDE.md`: compatibility pointer to this file; do not duplicate durable root rules there.
+- Scoped `AGENTS.md` files under `bridge/`, `webui/`, `pythinker/providers/`, `pythinker/channels/`, `pythinker/agent/tools/`, and `pythinker/templates/` add subtree-specific rules; root rules still apply.
+- `CLAUDE.md`: Claude Code entrypoint; `@`-imports this file plus `CLAUDE.local.md` and `AGENTS.override.md`. Do not duplicate durable rules there.
+- `AGENTS.override.md` / `CLAUDE.local.md`: gitignored local overlays. Keep durable rules in this file.
 - `docs/`: architecture, configuration, deployment, channel, memory, security, SDK, API, CLI, and
   onboarding docs.
 - `tests/`: pytest suite mirroring package layout.
@@ -194,45 +193,14 @@ Read these before changing their behavior:
 
 ## Pythinker-specific design rules
 
-### Providers
+Per-subsystem rules live in scoped `AGENTS.md` files so they load automatically when an agent works in that subtree. Always read the scoped file when touching code there:
 
-- Read upstream docs/source/types before changing provider-backed behavior. Do not assume API
-  defaults, response shapes, retry semantics, or error models.
-- Keep provider quirks in provider modules or override maps. Examples include DashScope
-  `enable_thinking`, MiniMax `reasoning_split`, VolcEngine `thinking.type`, Moonshot
-  `temperature=1.0`, Anthropic `cache_control`, Codex OAuth, and Copilot OAuth/token exchange.
-- `OpenAICompatProvider` owns shared OpenAI-compatible behavior, per-model overrides, retries, role
-  alternation, image stripping, and the Responses-API circuit breaker.
-- The Responses circuit breaker has failure/probe timing; flaky live tests may be affected by a
-  provider sitting out after repeated Responses failures.
-- Tests should use model strings from `pythinker/providers/registry.py` unless a test explicitly
-  covers a new registry entry.
-
-### Channels
-
-- Keep chat-platform quirks in channel adapters: Telegram HTML parsing, Slack threading/mrkdwn,
-  MS Teams JWT validation, WhatsApp bridge integration, etc.
-- Adding a channel requires: `pythinker/channels/<name>.py`, registry entry,
-  `ChannelsConfig` schema, docs in `docs/chat-apps.md` and/or
-  `docs/channel-plugin-guide.md`, and tests under `tests/channels/`.
-- Third-party channels discover through the `pythinker.channels` entry point.
-- Use the words “channel/channels” or “chat platform” in docs/UI/changelog; `pythinker/channels/`
-  is the internal layout name.
-
-### Tools and MCP
-
-- Built-in tools live under `pythinker/agent/tools/` and register through the tool registry/schema.
-- Adding a tool requires: implementation, registry/schema updates, docs in `docs/my-tool.md`, and
-  tests in `tests/agent/tools/` or `tests/tools/`.
-- Side-effecting tools must respect approval/runtime policy. Do not bypass higher-level approval
-  checks by calling lower-level helpers directly.
-- The shell tool uses bubblewrap on Linux. Do not add sandbox bypasses or remove required Docker
-  capabilities just for convenience.
-- `GrepTool` has regex and output-size footguns; preserve binary/file-size/output limits when
-  changing it.
-- `pythinker/agent/tools/file_state.py` keeps module-level dedup state and is not thread-safe; do
-  not share read/write tool instances across loops without synchronization.
-- `web_fetch` marks external content as untrusted. Preserve that boundary.
+- [`pythinker/providers/AGENTS.md`](pythinker/providers/AGENTS.md) — LLM provider adapters, quirks, Responses circuit breaker, registry.
+- [`pythinker/channels/AGENTS.md`](pythinker/channels/AGENTS.md) — chat-platform adapters, channel registry, bridge/WebUI pairing rules.
+- [`pythinker/agent/tools/AGENTS.md`](pythinker/agent/tools/AGENTS.md) — built-in tools, MCP, approval/sandboxing, footguns.
+- [`bridge/AGENTS.md`](bridge/AGENTS.md) — WhatsApp Node bridge wire protocol.
+- [`webui/AGENTS.md`](webui/AGENTS.md) — React frontend, WebSocket types, build output.
+- [`pythinker/templates/AGENTS.md`](pythinker/templates/AGENTS.md) — **published runtime surface** shipped to end-user workspaces; not a contributor guide. Edits ship to PyPI and change end-user agent behavior.
 
 ### Memory, skills, and templates
 
@@ -257,18 +225,14 @@ Read these before changing their behavior:
   security gap silently.
 - Persisted checkpoint/session keys require migration planning before rename/removal.
 
-### WebUI and WhatsApp bridge
+### Cross-surface invariants (WebUI / bridge)
 
-- `pythinker/web/dist/` is generated; rebuild via `cd webui && bun run build`.
-- WebUI talks to `pythinker gateway` over the WebSocket multiplex protocol and REST endpoints on
-  the same port.
-- Signed media URL secrets intentionally regenerate on gateway restart; old links returning 401 is
-  by design.
-- Image upload limits are intentional: max 4 images per message, 8 MB per image, MIME whitelist for
-  png/jpeg/webp/gif.
-- `bridge/` is a thin Baileys relay. Keep all business logic in Python.
-- Files under `bridge/src/` and selected bridge config files are force-included in the wheel; files
-  elsewhere in `bridge/` may not ship.
+- `pythinker/web/dist/` is generated; rebuild via `cd webui && bun run build`. Never hand-edit.
+- Signed media URL secrets intentionally regenerate on gateway restart; old links returning 401 is by design.
+- Image upload limits are intentional: max 4 images per message, 8 MB per image, MIME whitelist for png/jpeg/webp/gif.
+- `bridge/` is a thin Baileys relay; keep all business logic in Python. Only `bridge/src/` and selected bridge config files are force-included in the wheel.
+
+Detailed rules for these surfaces live in their scoped `AGENTS.md` files.
 
 ## Security rules
 
@@ -303,28 +267,9 @@ Read these before changing their behavior:
 3. Add focused tests under `tests/cli/` or the owning subsystem.
 4. Update docs when user-facing syntax or behavior changes.
 
-### Adding a provider
+### Adding a provider, channel, or tool
 
-1. Add provider code or `OpenAICompatProvider` overrides in `pythinker/providers/`.
-2. Register the provider/model in `pythinker/providers/registry.py`.
-3. Update onboarding/auth/config paths as needed.
-4. Add focused provider tests with mocked HTTP boundaries.
-5. Update `docs/configuration.md` and any onboarding/status docs.
-
-### Adding a channel
-
-1. Implement the adapter under `pythinker/channels/`.
-2. Register it in `pythinker/channels/registry.py` and `ChannelsConfig`.
-3. Add focused tests under `tests/channels/`.
-4. Update channel docs and onboarding/status surfaces.
-
-### Adding a tool
-
-1. Implement the tool under `pythinker/agent/tools/` with a small public surface.
-2. Update registry and schema fragments.
-3. Make approval, sandboxing, and side effects explicit.
-4. Add focused tests for schema, execution, errors, and safety-sensitive behavior.
-5. Update `docs/my-tool.md`.
+These have scoped playbooks: see `pythinker/providers/AGENTS.md`, `pythinker/channels/AGENTS.md`, and `pythinker/agent/tools/AGENTS.md` respectively.
 
 ### Changing prompts, skills, or templates
 
@@ -407,11 +352,10 @@ Read these before changing their behavior:
 - Optional conventional prefixes are fine: `fix:`, `feat:`, `refactor:`, `test:`, `docs:`,
   `chore:`, `perf:`, `build:`.
 - Body explains what and why; the diff shows how.
-- Commit/tag author email is `melkholy@techmatrix.com` when creating commits/tags.
+- Use the email configured in `git config user.email` for the local clone — do not hardcode an address here.
 - Branches: `main` is stable for bug fixes/docs/minor tweaks; `dev` is experimental. When in doubt,
   target `dev`.
 - No merge commits on `main`; rebase on latest `origin/main` before push.
-- Never add `Co-Authored-By: Claude`, “Generated with Claude Code”, or similar AI/tool footers.
 - Stage intended files only. Do not use `git add -A` or `git add .` unless every worktree change is
   intentional.
 

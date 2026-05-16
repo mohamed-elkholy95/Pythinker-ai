@@ -21,8 +21,10 @@ from pythinker.agent.loop import AgentLoop
 def mock_loop():
     """Create a minimal AgentLoop with mocked dependencies."""
     with patch.object(AgentLoop, "__init__", lambda self: None):
+        from pythinker.agent.checkpoint import CheckpointManager
         loop = AgentLoop()
         loop.sessions = MagicMock()
+        loop.checkpoint = CheckpointManager(sessions=loop.sessions)
         loop._pending_queues = {}
         loop._session_locks = {}
         loop._active_tasks = {}

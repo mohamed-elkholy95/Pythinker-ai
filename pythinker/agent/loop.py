@@ -16,6 +16,7 @@ from loguru import logger
 
 from pythinker.agent import loop_context, loop_reload, loop_tools
 from pythinker.agent.autocompact import AutoCompact
+from pythinker.agent.checkpoint import CheckpointManager
 from pythinker.agent.context import ContextBuilder
 from pythinker.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from pythinker.agent.memory import Consolidator, Dream
@@ -182,8 +183,12 @@ class AgentLoop:
     5. Sends responses back
     """
 
-    _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
-    _PENDING_USER_TURN_KEY = "pending_user_turn"
+    # Re-exported on AgentLoop for compatibility with tests and external callers
+    # that read AgentLoop._RUNTIME_CHECKPOINT_KEY / _PENDING_USER_TURN_KEY. The
+    # canonical home is `pythinker.agent.checkpoint`; the literal string values
+    # are persisted into sessions on disk and must never change.
+    _RUNTIME_CHECKPOINT_KEY = CheckpointManager.RUNTIME_CHECKPOINT_KEY
+    _PENDING_USER_TURN_KEY = CheckpointManager.PENDING_USER_TURN_KEY
 
     def __init__(
         self,
@@ -284,6 +289,7 @@ class AgentLoop:
             workspace,
             cache_max=self._session_cache_max,
         )
+        self.checkpoint = CheckpointManager(sessions=self.sessions)
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
         self.task_store = TaskStore(self.workspace)
@@ -1512,106 +1518,28 @@ class AgentLoop:
         )
         return True
 
+    # Thin backwards-compat delegates so external callers (e.g.
+    # pythinker/channels/websocket/channel.py) and existing test patches that
+    # use loop._restore_runtime_checkpoint / loop._clear_pending_user_turn /
+    # etc. keep working. New code should call self.checkpoint.X directly.
+
     def _set_runtime_checkpoint(self, session: Session, payload: dict[str, Any]) -> None:
-        """Persist the latest in-flight turn state into session metadata."""
-        session.metadata[self._RUNTIME_CHECKPOINT_KEY] = payload
-        self.sessions.save(session)
+        self.checkpoint.set_runtime_checkpoint(session, payload)
 
     def _mark_pending_user_turn(self, session: Session) -> None:
-        session.metadata[self._PENDING_USER_TURN_KEY] = True
+        self.checkpoint.mark_pending_user_turn(session)
 
     def _clear_pending_user_turn(self, session: Session) -> None:
-        session.metadata.pop(self._PENDING_USER_TURN_KEY, None)
+        self.checkpoint.clear_pending_user_turn(session)
 
     def _clear_runtime_checkpoint(self, session: Session) -> None:
-        if self._RUNTIME_CHECKPOINT_KEY in session.metadata:
-            session.metadata.pop(self._RUNTIME_CHECKPOINT_KEY, None)
-
-    @staticmethod
-    def _checkpoint_message_key(message: dict[str, Any]) -> tuple[Any, ...]:
-        return (
-            message.get("role"),
-            message.get("content"),
-            message.get("tool_call_id"),
-            message.get("name"),
-            message.get("tool_calls"),
-            message.get("reasoning_content"),
-            message.get("thinking_blocks"),
-        )
+        self.checkpoint.clear_runtime_checkpoint(session)
 
     def _restore_runtime_checkpoint(self, session: Session) -> bool:
-        """Materialize an unfinished turn into session history before a new request."""
-        from datetime import datetime
-
-        checkpoint = session.metadata.get(self._RUNTIME_CHECKPOINT_KEY)
-        if not isinstance(checkpoint, dict):
-            return False
-
-        assistant_message = checkpoint.get("assistant_message")
-        completed_tool_results = checkpoint.get("completed_tool_results") or []
-        pending_tool_calls = checkpoint.get("pending_tool_calls") or []
-
-        restored_messages: list[dict[str, Any]] = []
-        if isinstance(assistant_message, dict):
-            restored = dict(assistant_message)
-            restored.setdefault("timestamp", datetime.now().isoformat())
-            restored_messages.append(restored)
-        for message in completed_tool_results:
-            if isinstance(message, dict):
-                restored = dict(message)
-                restored.setdefault("timestamp", datetime.now().isoformat())
-                restored_messages.append(restored)
-        for tool_call in pending_tool_calls:
-            if not isinstance(tool_call, dict):
-                continue
-            tool_id = tool_call.get("id")
-            name = ((tool_call.get("function") or {}).get("name")) or "tool"
-            restored_messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_id,
-                    "name": name,
-                    "content": "Error: Task interrupted before this tool finished.",
-                    "timestamp": datetime.now().isoformat(),
-                }
-            )
-
-        overlap = 0
-        max_overlap = min(len(session.messages), len(restored_messages))
-        for size in range(max_overlap, 0, -1):
-            existing = session.messages[-size:]
-            restored = restored_messages[:size]
-            if all(
-                self._checkpoint_message_key(left) == self._checkpoint_message_key(right)
-                for left, right in zip(existing, restored)
-            ):
-                overlap = size
-                break
-        session.messages.extend(restored_messages[overlap:])
-
-        self._clear_pending_user_turn(session)
-        self._clear_runtime_checkpoint(session)
-        return True
+        return self.checkpoint.restore_runtime_checkpoint(session)
 
     def _restore_pending_user_turn(self, session: Session) -> bool:
-        """Close a turn that only persisted the user message before crashing."""
-        from datetime import datetime
-
-        if not session.metadata.get(self._PENDING_USER_TURN_KEY):
-            return False
-
-        if session.messages and session.messages[-1].get("role") == "user":
-            session.messages.append(
-                {
-                    "role": "assistant",
-                    "content": "Error: Task interrupted before a response was generated.",
-                    "timestamp": datetime.now().isoformat(),
-                }
-            )
-            session.updated_at = datetime.now()
-
-        self._clear_pending_user_turn(session)
-        return True
+        return self.checkpoint.restore_pending_user_turn(session)
 
     def preauthorize_direct(
         self,

@@ -278,6 +278,11 @@ class WhatsAppChannel(BaseChannel):
                     transcription = await self.transcribe_audio(media_paths[0])
                     if transcription:
                         content = transcription
+                        # The .ogg path was only useful for transcription. Drop it so
+                        # downstream tagging does not append `[file: ...voice.ogg]`,
+                        # which would otherwise reach the LLM and prompt a "cannot
+                        # process audio" reply despite successful transcription.
+                        media_paths = []
                         logger.info("Transcribed voice from {}: {}...", sender_id, transcription[:50])
                     else:
                         content = "[Voice Message: Transcription failed]"

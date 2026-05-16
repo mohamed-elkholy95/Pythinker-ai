@@ -263,6 +263,13 @@ async def test_voice_message_transcription_uses_media_path():
     ch.transcribe_audio.assert_awaited_once_with("/tmp/voice.ogg")
     kwargs = ch._handle_message.await_args.kwargs
     assert kwargs["content"].startswith("Hello world")
+    # Regression: the .ogg path must not leak into content as `[file: ...]`
+    # or into the outbound `media` list — otherwise the LLM sees an audio
+    # attachment alongside the transcription and replies "cannot process
+    # audio" despite the transcription having succeeded.
+    assert "[file:" not in kwargs["content"]
+    assert "voice.ogg" not in kwargs["content"]
+    assert kwargs["media"] == []
 
 
 @pytest.mark.asyncio

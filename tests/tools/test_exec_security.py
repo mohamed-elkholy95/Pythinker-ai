@@ -182,3 +182,44 @@ async def test_exec_ignores_workspace_check_when_not_restricted(tmp_path):
     result = await tool.execute(command="echo ok", working_dir=str(other))
     assert "ok" in result
     assert "outside the configured workspace" not in result
+
+
+# --- format command guard --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "format C: /q",
+        "format D: /fs:ntfs",
+        "&& format",
+        "| format",
+        "&format",
+        ";format",
+        "|format",
+    ],
+)
+def test_exec_blocks_format_command(command):
+    """The Windows ``format`` disk command must be denied."""
+    tool = ExecTool()
+    result = tool._guard_command(command, "/tmp")
+    assert result is not None
+    assert "dangerous pattern detected" in result.lower()
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Regression: URL parameter `format=` must NOT be blocked.
+        'curl -s "wttr.in/xxx?lang=en&format=%l:+%c+%t+%h+%w&1"',
+        'curl -s "wttr.in/xxx?format=%l:+%c+%t+%h+%w&1"',
+        # `format` appearing as a normal argument word, not a command.
+        "echo format",
+        "echo reformat",
+    ],
+)
+def test_exec_allows_format_in_url_and_args(command):
+    """``format`` inside URL parameters or as a non-command arg must be allowed."""
+    tool = ExecTool()
+    result = tool._guard_command(command, "/tmp")
+    assert result is None

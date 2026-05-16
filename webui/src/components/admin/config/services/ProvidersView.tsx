@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import type { AdminProviderSurfaceRow } from "@/lib/admin-api";
+import { cn } from "@/lib/utils";
 
 import { ProviderHeatmap } from "../visualizations/ProviderHeatmap";
 import { ProviderMatrix } from "../visualizations/ProviderMatrix";
@@ -20,9 +21,18 @@ export function ProvidersView({ surfaces, onFocusPath }: WorkbenchServiceProps) 
       <ProviderHeatmap rows={rows} />
       <div className="flex flex-wrap gap-2" aria-label="Provider filters">
         {(["all", "configured", "needs-key"] as const).map((item) => (
-          <Button key={item} onClick={() => setFilter(item)} type="button" variant={filter === item ? "default" : "outline"} size="sm">
+          <button
+            key={item}
+            type="button"
+            aria-pressed={filter === item}
+            onClick={() => setFilter(item)}
+            className={cn(
+              "menu-green-hover inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium",
+              filter === item && "menu-green-active",
+            )}
+          >
             {item === "needs-key" ? "Needs key" : item[0].toUpperCase() + item.slice(1)}
-          </Button>
+          </button>
         ))}
       </div>
       <ProviderMatrix rows={visible} onAddKey={(name) => setSecretProvider(name)} />

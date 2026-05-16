@@ -42,7 +42,7 @@ export function ToolsView({ config, surfaces, onFocusPath }: WorkbenchServicePro
     <div className="space-y-4">
       <div role="tablist" aria-label="Tool views" className="inline-flex flex-wrap gap-1 rounded-xl border border-border bg-background p-1">
         {TABS.map((tab) => (
-          <button key={tab} type="button" role="tab" aria-selected={active === tab} onClick={() => setActive(tab)} className={cn("rounded-lg px-3 py-1.5 text-xs", active === tab ? "bg-primary/15 text-primary" : "text-muted-foreground")}>{tab}</button>
+          <button key={tab} type="button" role="tab" aria-selected={active === tab} onClick={() => setActive(tab)} className={cn("menu-green-hover rounded-lg px-3 py-1.5 text-xs text-muted-foreground", active === tab && "menu-green-active")}>{tab}</button>
         ))}
       </div>
       <ServicePanel title={`${active} tool`}>

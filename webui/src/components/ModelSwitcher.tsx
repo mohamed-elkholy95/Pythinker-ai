@@ -108,10 +108,7 @@ export function ModelSwitcher({
                       type="button"
                       role="menuitem"
                       onClick={() => handleSelect(m.name)}
-                      className={cn(
-                        "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left",
-                        "hover:bg-accent",
-                      )}
+                      className="menu-green-hover flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left"
                     >
                       <span className="truncate text-[12px]">{m.name}</span>
                       {isActive ? <Check size={12} /> : null}
@@ -128,10 +125,7 @@ export function ModelSwitcher({
                       setOpen(false);
                       onChange("");
                     }}
-                    className={cn(
-                      "mt-1 flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left",
-                      "border-t border-border/50 pt-2 text-[11px] text-muted-foreground hover:bg-accent",
-                    )}
+                    className="menu-green-hover mt-1 flex w-full items-center gap-2 rounded-md border-t border-border/50 px-2.5 py-1.5 pt-2 text-left text-[11px] text-muted-foreground"
                   >
                     {t("model.switcher.default")}
                   </button>

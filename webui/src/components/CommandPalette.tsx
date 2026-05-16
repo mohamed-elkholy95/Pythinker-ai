@@ -124,8 +124,8 @@ export function CommandPalette({
             onMouseEnter={() => setHighlight(i)}
             onClick={() => onSelect(cmd.name)}
             className={cn(
-              "flex cursor-pointer items-baseline justify-between gap-3 rounded-md px-2.5 py-1.5",
-              i === highlight ? "bg-accent text-accent-foreground" : "text-foreground",
+              "menu-green-hover flex cursor-pointer items-baseline justify-between gap-3 rounded-md px-2.5 py-1.5 text-foreground",
+              i === highlight && "menu-green-active",
             )}
           >
             <span className="font-mono text-[12px]">{cmd.name}</span>

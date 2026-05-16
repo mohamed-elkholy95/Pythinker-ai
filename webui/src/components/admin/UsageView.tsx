@@ -100,10 +100,8 @@ function SubViewSwitch({
           aria-selected={active === v.id}
           onClick={() => onChange(v.id)}
           className={cn(
-            "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
-            active === v.id
-              ? "bg-primary/15 text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.3)]"
-              : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+            "menu-green-hover inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground",
+            active === v.id && "menu-green-active",
           )}
         >
           {v.icon}

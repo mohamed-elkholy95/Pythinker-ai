@@ -2,7 +2,7 @@
   <img src="https://cdn.jsdelivr.net/gh/mohamed-elkholy95/Pythinker-ai@main/webui/public/brand/icon.svg" alt="Pythinker" width="180">
 </p>
 
-<h1 align="center">🤖 Pythinker</h1>
+<h1 align="center"> Pythinker</h1>
 
 <div align="center">
   <p>

@@ -18,6 +18,8 @@
 
 > Powered by a tiny, multiplexing agent loop: one Python process listens to Slack, Telegram, Discord, WhatsApp, Matrix, MS Teams, email, a WebSocket WebUI, and an OpenAI-compatible HTTP API — all backed by a single session-scoped memory layer.
 
+> **What's new in 2.4.0** — refreshed onboarding wizard with a coherent timeline rail (● completed · ◉ active · ◐ in-progress) and a muted violet accent, slash-command history now persists across TUI restarts, and the project mascot is now 🤖. See the [changelog](CHANGELOG.md) for details.
+
 ## 💡 Key Features
 
 - **Tiny agent** — a compact readable core. Stable long-running behavior without orchestration sprawl.

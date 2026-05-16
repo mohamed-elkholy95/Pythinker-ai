@@ -6,6 +6,42 @@ All notable user-visible changes to Pythinker land here. The project follows
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-05-15
+
+### Added
+
+- Slash-command exchanges are now persisted to chat history so the TUI can
+  replay them across sessions, while a sentinel tag keeps the rows out of the
+  LLM context window.
+
+### Changed
+
+- Onboarding visual refresh on the clack timeline: the completed-step marker
+  is now `●` (solid circle), the active prompt is `◉`, and note panels close
+  with a rounded `╰─╯` corner so each block reads as a closed loop on the
+  rail. The wizard accent shifts from terminal cyan to a muted violet
+  (`#9277c4`) across the welcome banner, settings tables, signup panel, and
+  inline highlights.
+- Mascot rebrand from `🐍` to `🤖` across the logo, TUI welcome, `/commands`
+  header, onboarding outro, SOUL persona template, WhatsApp bridge banner,
+  README, and docs.
+- Long titles, status lines, and resolved-answer rows now wrap so every
+  continuation row stays on the `│` timeline rail instead of breaking out at
+  column 0; the recorded answer row no longer escapes the bar on narrow
+  terminals.
+- Active questionary choice rows are aligned to the timeline rail, and the
+  stale default-row green highlight that lingered after the cursor moved is
+  cleared so only the hovered row is styled.
+- Settings field editor and other Rich-rendered hover states share the same
+  green-on-default treatment as the onboarding picker for visual consistency.
+
+### Fixed
+
+- Slash-command history is now persisted between sessions instead of being
+  lost when the TUI restarts.
+- Resolved-question records and status lines no longer break the persistent
+  `│` timeline when they wrap on narrow terminals.
+
 ## [2.3.0] - 2026-05-14
 
 ### Added

@@ -37,18 +37,6 @@ RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
 PENDING_USER_TURN_KEY = "pending_user_turn"
 
 
-def _checkpoint_message_key(message: dict[str, Any]) -> tuple[Any, ...]:
-    return (
-        message.get("role"),
-        message.get("content"),
-        message.get("tool_call_id"),
-        message.get("name"),
-        message.get("tool_calls"),
-        message.get("reasoning_content"),
-        message.get("thinking_blocks"),
-    )
-
-
 class CheckpointManager:
     """Owns runtime-checkpoint and pending-user-turn session metadata.
 
@@ -60,6 +48,19 @@ class CheckpointManager:
 
     def __init__(self, sessions: "SessionManager") -> None:
         self.sessions = sessions
+
+    @staticmethod
+    def checkpoint_message_key(message: dict[str, Any]) -> tuple[Any, ...]:
+        """Stable identity tuple for dedup-matching a restored message against history."""
+        return (
+            message.get("role"),
+            message.get("content"),
+            message.get("tool_call_id"),
+            message.get("name"),
+            message.get("tool_calls"),
+            message.get("reasoning_content"),
+            message.get("thinking_blocks"),
+        )
 
     def set_runtime_checkpoint(self, session: "Session", payload: dict[str, Any]) -> None:
         """Persist the latest in-flight turn state into session metadata."""
@@ -117,7 +118,7 @@ class CheckpointManager:
             existing = session.messages[-size:]
             restored = restored_messages[:size]
             if all(
-                _checkpoint_message_key(left) == _checkpoint_message_key(right)
+                self.checkpoint_message_key(left) == self.checkpoint_message_key(right)
                 for left, right in zip(existing, restored)
             ):
                 overlap = size

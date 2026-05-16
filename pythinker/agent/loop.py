@@ -7,6 +7,7 @@ import dataclasses
 import json
 import os
 import time
+import uuid
 from contextlib import AsyncExitStack, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -729,6 +730,20 @@ class AgentLoop:
 
         Returns (final_content, tools_used, messages, stop_reason, had_injections).
         """
+        # Per-turn trace id for log correlation across concurrent sessions. Bound
+        # onto a child logger so all calls below carry `turn_id` as an extra,
+        # visible in extras-aware sinks (JSON output, structured logging, etc.).
+        turn_id = uuid.uuid4().hex[:8]
+        tlog = logger.bind(
+            turn_id=turn_id,
+            session_key=session.key if session is not None else None,
+        )
+        tlog.debug(
+            "turn start channel={} chat_id={} message_id={}",
+            channel,
+            chat_id,
+            message_id,
+        )
         ctx_for_run = msg.context if msg is not None else None
         loop_hook = _LoopHook(
             self,
@@ -798,7 +813,7 @@ class AgentLoop:
                     async with asyncio.timeout(300):
                         msg = await pending_queue.get()
                 except TimeoutError:
-                    logger.warning(
+                    tlog.warning(
                         "Timeout waiting for sub-agent completion in session {}",
                         session.key,
                     )
@@ -859,9 +874,9 @@ class AgentLoop:
                     usage=result.usage,
                 )
             except Exception:
-                logger.exception("Failed to record usage ledger row")
+                tlog.exception("Failed to record usage ledger row")
         if result.stop_reason == "max_iterations":
-            logger.warning("Max iterations ({}) reached", self.max_iterations)
+            tlog.warning("Max iterations ({}) reached", self.max_iterations)
             # Push final content through stream so streaming channels
             # update the card instead of leaving it empty.
             if on_stream and on_stream_end:

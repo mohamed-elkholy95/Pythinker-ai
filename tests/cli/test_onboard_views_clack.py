@@ -373,6 +373,10 @@ def test_select_keeps_full_hint_and_erases_questionary_answer_line():
     assert captured["kwargs"]["erase_when_done"] is True
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="questionary instantiates prompt_toolkit Application; Windows CI has no console buffer.",
+)
 def test_select_default_starts_cursor_without_stale_green_selection():
     """The default row should not stay highlighted after moving to another row."""
     import questionary
@@ -398,6 +402,10 @@ def test_select_default_starts_cursor_without_stale_green_selection():
     assert control.selected_options == []
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="questionary instantiates prompt_toolkit Application; Windows CI has no console buffer.",
+)
 def test_select_active_choice_rows_stay_on_timeline_rail():
     import questionary
 

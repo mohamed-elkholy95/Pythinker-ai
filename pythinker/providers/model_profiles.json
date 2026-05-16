@@ -1,0 +1,20 @@
+{
+  "models": [
+    {"provider":"openai","model_id":"gpt-5.5","input_tokens":1050000,"max_output_tokens":128000,"total_context_tokens":1050000,"encoding":"o200k_base","source":"official_docs","confidence":"official","preferred_api":"responses","supports_tools":true,"supports_reasoning":true},
+    {"provider":"openai","model_id":"gpt-5.4","input_tokens":1050000,"max_output_tokens":128000,"total_context_tokens":1050000,"encoding":"o200k_base","source":"official_docs","confidence":"official","preferred_api":"responses","supports_tools":true,"supports_reasoning":true},
+    {"provider":"openai","model_id":"gpt-5.4-mini","input_tokens":400000,"max_output_tokens":128000,"total_context_tokens":400000,"encoding":"o200k_base","source":"official_docs","confidence":"official","preferred_api":"responses","supports_tools":true},
+    {"provider":"openai","model_id":"gpt-5.4-nano","input_tokens":400000,"max_output_tokens":128000,"total_context_tokens":400000,"encoding":"o200k_base","source":"official_docs","confidence":"official","preferred_api":"responses","supports_tools":true},
+    {"provider":"openai","model_id":"gpt-5.2-chat","input_tokens":111616,"max_output_tokens":16384,"total_context_tokens":128000,"encoding":"o200k_base","source":"official_docs","confidence":"official","preferred_api":"chat_completions","supports_tools":true},
+    {"provider":"openai_codex","model_id":"gpt-5.5","input_tokens":272000,"max_output_tokens":128000,"total_context_tokens":400000,"encoding":"o200k_base","source":"curated","confidence":"curated","preferred_api":"responses","supports_tools":true,"supports_reasoning":true},
+    {"provider":"openai_codex","model_id":"gpt-5.4","input_tokens":272000,"max_output_tokens":128000,"total_context_tokens":400000,"encoding":"o200k_base","source":"curated","confidence":"curated","preferred_api":"responses","supports_tools":true},
+    {"provider":"openai_codex","model_id":"gpt-5.4-mini","input_tokens":272000,"max_output_tokens":128000,"total_context_tokens":400000,"encoding":"o200k_base","source":"curated","confidence":"curated","preferred_api":"responses","supports_tools":true},
+    {"provider":"openai_codex","model_id":"gpt-5.3-codex","input_tokens":272000,"max_output_tokens":128000,"total_context_tokens":400000,"encoding":"o200k_base","source":"curated","confidence":"curated","preferred_api":"responses","supports_tools":true},
+    {"provider":"azure_openai","model_id":"gpt-5.1","input_tokens":272000,"max_output_tokens":128000,"total_context_tokens":400000,"encoding":"o200k_base","source":"official_docs","confidence":"official","supports_tools":true},
+    {"provider":"azure_openai","model_id":"gpt-5.1-chat","input_tokens":111616,"max_output_tokens":16384,"total_context_tokens":128000,"encoding":"o200k_base","source":"official_docs","confidence":"official","supports_tools":true},
+    {"provider":"anthropic","model_id":"claude-opus-4-7","encoding":"cl100k_base","source":"provider_api","confidence":"provider_api","preferred_api":"anthropic_messages","count_tokens_supported":true,"runtime_metadata_supported":true},
+    {"provider":"anthropic","model_id":"claude-sonnet-4-6","encoding":"cl100k_base","source":"provider_api","confidence":"provider_api","preferred_api":"anthropic_messages","count_tokens_supported":true,"runtime_metadata_supported":true},
+    {"provider":"github_copilot","model_id":"gpt-5.5","input_tokens":128000,"max_output_tokens":16384,"total_context_tokens":128000,"encoding":"o200k_base","source":"fallback","confidence":"fallback","runtime_metadata_supported":true},
+    {"provider":"gemini","model_id":"gemini-3-flash","aliases":["gemini-flash-latest","-latest"],"input_tokens":1048576,"max_output_tokens":65536,"total_context_tokens":1048576,"encoding":"cl100k_base","source":"provider_api","confidence":"provider_api","supports_tools":true,"supports_vision":true},
+    {"provider":"gemini","model_id":"gemini-3.1-pro","aliases":["gemini-pro-latest"],"input_tokens":1048576,"max_output_tokens":65536,"total_context_tokens":1048576,"encoding":"cl100k_base","source":"provider_api","confidence":"provider_api","supports_tools":true,"supports_vision":true}
+  ]
+}

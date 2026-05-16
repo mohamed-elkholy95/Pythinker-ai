@@ -6,7 +6,6 @@ import { Sidebar } from "@/components/Sidebar";
 import { AdminDashboard } from "@/components/admin/AdminDashboard";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { preloadMarkdownText } from "@/components/MarkdownText";
 import { useHotkey } from "@/hooks/useHotkey";
 import { useSessions } from "@/hooks/useSessions";
 import { useTheme } from "@/hooks/useTheme";
@@ -85,23 +84,6 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  useEffect(() => {
-    const warm = () => preloadMarkdownText();
-    const win = globalThis as typeof globalThis & {
-      requestIdleCallback?: (
-        callback: IdleRequestCallback,
-        options?: IdleRequestOptions,
-      ) => number;
-      cancelIdleCallback?: (handle: number) => void;
-    };
-    if (typeof win.requestIdleCallback === "function") {
-      const id = win.requestIdleCallback(warm, { timeout: 1500 });
-      return () => win.cancelIdleCallback?.(id);
-    }
-    const id = globalThis.setTimeout(warm, 250);
-    return () => globalThis.clearTimeout(id);
   }, []);
 
   if (state.status === "loading") {

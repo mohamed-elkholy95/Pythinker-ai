@@ -112,3 +112,6 @@ logs/
 tmp/
 temp/
 *.tmp
+
+# graphify knowledge-graph output (generated locally; large HTML/JSON, regenerable)
+graphify-out/

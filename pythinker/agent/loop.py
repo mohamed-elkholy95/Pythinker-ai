@@ -774,7 +774,7 @@ class AgentLoop:
                 if media:
                     content, media = extract_documents(content, media)
                     media = media or None
-                user_content = self.context._build_user_content(content, media)
+                user_content = self.context.build_user_content(content, media)
                 return {"role": "user", "content": user_content}
 
             items: list[dict[str, Any]] = []

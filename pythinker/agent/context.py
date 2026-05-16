@@ -139,14 +139,8 @@ class ContextBuilder:
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id, self.timezone, session_summary=session_summary)
-        user_content = self._build_user_content(current_message, media)
+        merged = self.build_user_content(current_message, media, runtime_context=runtime_ctx)
 
-        # Merge runtime context and user content into a single user message
-        # to avoid consecutive same-role messages that some providers reject.
-        if isinstance(user_content, str):
-            merged = f"{runtime_ctx}\n\n{user_content}"
-        else:
-            merged = [{"type": "text", "text": runtime_ctx}] + user_content
         messages = [
             {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel)},
             *history,
@@ -158,6 +152,31 @@ class ContextBuilder:
             return messages
         messages.append({"role": current_role, "content": merged})
         return messages
+
+    def build_user_content(
+        self,
+        content: str,
+        media: list[str] | None = None,
+        *,
+        runtime_context: str | None = None,
+    ) -> str | list[dict[str, Any]]:
+        """Build a user-role message body, optionally prefixed with runtime context.
+
+        Public API consumed by `build_messages` and by callers (e.g. the agent
+        loop's pending-message drain) that need user content without poking
+        the internal image-only helper.
+
+        When ``runtime_context`` is provided, it is merged BEFORE the user
+        content, matching the order `build_messages` uses for the initial turn
+        message: a single user message that prevents consecutive same-role
+        messages some providers reject.
+        """
+        user_content = self._build_user_content(content, media)
+        if runtime_context is None:
+            return user_content
+        if isinstance(user_content, str):
+            return f"{runtime_context}\n\n{user_content}"
+        return [{"type": "text", "text": runtime_context}] + user_content
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""

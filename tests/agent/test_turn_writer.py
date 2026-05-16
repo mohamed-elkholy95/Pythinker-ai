@@ -6,10 +6,14 @@ Covers:
 - oversized tool results are truncated
 - image blocks become text placeholders with path
 - persist_subagent_followup dedupes by subagent_task_id
+- persist_user_message_early marks pending + saves, kwargs pass-through
 """
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
+from pythinker.agent.checkpoint import CheckpointManager
 from pythinker.agent.context import ContextBuilder
 from pythinker.agent.turn_writer import TurnWriter
 from pythinker.bus.events import InboundMessage
@@ -17,7 +21,13 @@ from pythinker.session.manager import Session
 
 
 def _make_writer(max_chars: int = 1000) -> TurnWriter:
-    return TurnWriter(max_tool_result_chars=max_chars)
+    sessions = MagicMock()
+    checkpoint = CheckpointManager(sessions=sessions)
+    return TurnWriter(
+        sessions=sessions,
+        checkpoint=checkpoint,
+        max_tool_result_chars=max_chars,
+    )
 
 
 def test_save_turn_appends_assistant_with_text() -> None:
@@ -123,3 +133,59 @@ def test_persist_subagent_followup_skips_empty_content() -> None:
     msg = InboundMessage(channel="cli", sender_id="s", chat_id="c", content="")
     assert writer.persist_subagent_followup(session, msg) is False
     assert session.messages == []
+
+
+# --- persist_user_message_early ---------------------------------------------
+
+
+def test_persist_user_message_early_returns_false_for_empty_msg() -> None:
+    writer = _make_writer()
+    session = Session(key="cli:c")
+    msg = InboundMessage(channel="cli", sender_id="u", chat_id="c", content="")
+    assert writer.persist_user_message_early(msg, session) is False
+    assert session.messages == []
+    writer.sessions.save.assert_not_called()
+
+
+def test_persist_user_message_early_persists_text_and_marks_pending() -> None:
+    writer = _make_writer()
+    session = Session(key="cli:c")
+    msg = InboundMessage(channel="cli", sender_id="u", chat_id="c", content="hello")
+
+    assert writer.persist_user_message_early(msg, session) is True
+    assert len(session.messages) == 1
+    row = session.messages[-1]
+    assert row["role"] == "user"
+    assert row["content"] == "hello"
+    # pending-user-turn flag set so a crash mid-turn can be recovered.
+    assert session.metadata[CheckpointManager.PENDING_USER_TURN_KEY] is True
+    writer.sessions.save.assert_called_once_with(session)
+
+
+def test_persist_user_message_early_persists_media_only() -> None:
+    writer = _make_writer()
+    session = Session(key="cli:c")
+    msg = InboundMessage(
+        channel="cli",
+        sender_id="u",
+        chat_id="c",
+        content="",
+        media=["/tmp/a.png"],
+    )
+
+    assert writer.persist_user_message_early(msg, session) is True
+    row = session.messages[-1]
+    assert row["content"] == ""
+    assert row["media"] == ["/tmp/a.png"]
+
+
+def test_persist_user_message_early_forwards_kwargs() -> None:
+    """Kwargs like _command=True must merge onto the persisted row."""
+    writer = _make_writer()
+    session = Session(key="cli:c")
+    msg = InboundMessage(channel="cli", sender_id="u", chat_id="c", content="/help")
+
+    writer.persist_user_message_early(msg, session, _command=True)
+    row = session.messages[-1]
+    assert row["_command"] is True
+    assert row["content"] == "/help"

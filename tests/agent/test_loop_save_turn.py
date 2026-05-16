@@ -21,7 +21,11 @@ def _mk_loop() -> AgentLoop:
     from pythinker.agent.turn_writer import TurnWriter
     loop.sessions = MagicMock()
     loop.checkpoint = CheckpointManager(sessions=loop.sessions)
-    loop.turn_writer = TurnWriter(max_tool_result_chars=loop.max_tool_result_chars)
+    loop.turn_writer = TurnWriter(
+        sessions=loop.sessions,
+        checkpoint=loop.checkpoint,
+        max_tool_result_chars=loop.max_tool_result_chars,
+    )
     return loop
 
 

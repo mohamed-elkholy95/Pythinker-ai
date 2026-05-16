@@ -27,18 +27,27 @@ from pythinker.utils.helpers import image_placeholder_text
 from pythinker.utils.helpers import truncate_text as truncate_text_fn
 
 if TYPE_CHECKING:
+    from pythinker.agent.checkpoint import CheckpointManager
     from pythinker.bus.events import InboundMessage
-    from pythinker.session.manager import Session
+    from pythinker.session.manager import Session, SessionManager
 
 
 class TurnWriter:
     """Persist completed-turn messages + subagent follow-ups to session history.
 
-    Stateless beyond the per-loop `max_tool_result_chars` cap injected at
-    construction time.
+    Holds references to the session manager and checkpoint manager so
+    `persist_user_message_early` can both save the session and mark the
+    pending-user-turn flag in one call.
     """
 
-    def __init__(self, max_tool_result_chars: int) -> None:
+    def __init__(
+        self,
+        sessions: "SessionManager",
+        checkpoint: "CheckpointManager",
+        max_tool_result_chars: int,
+    ) -> None:
+        self.sessions = sessions
+        self._checkpoint = checkpoint
         self.max_tool_result_chars = max_tool_result_chars
 
     def sanitize_persisted_blocks(
@@ -123,6 +132,36 @@ class TurnWriter:
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
         session.updated_at = datetime.now()
+
+    def persist_user_message_early(
+        self,
+        msg: "InboundMessage",
+        session: "Session",
+        **kwargs: Any,
+    ) -> bool:
+        """Persist the triggering user message before the turn starts.
+
+        Writes the user message immediately, marks the pending-user-turn flag
+        (so a mid-turn crash can synthesize an "interrupted" assistant reply
+        on recovery), and saves the session. Extra keyword arguments are
+        merged onto the persisted row (e.g. ``_command=True`` for slash-command
+        turns persisted outside the LLM flow).
+
+        Returns True if a row was persisted, False if the message had neither
+        text nor media (nothing to save).
+        """
+        media_paths = [p for p in (msg.media or []) if isinstance(p, str) and p]
+        has_text = isinstance(msg.content, str) and msg.content.strip()
+        if not (has_text or media_paths):
+            return False
+
+        extra: dict[str, Any] = {"media": list(media_paths)} if media_paths else {}
+        extra.update(kwargs)
+        text = msg.content if isinstance(msg.content, str) else ""
+        session.add_message("user", text, **extra)
+        self._checkpoint.mark_pending_user_turn(session)
+        self.sessions.save(session)
+        return True
 
     def persist_subagent_followup(self, session: "Session", msg: "InboundMessage") -> bool:
         """Persist subagent follow-ups before prompt assembly so history stays durable.

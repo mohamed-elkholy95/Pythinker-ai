@@ -15,6 +15,9 @@ def test_sanitize_persisted_blocks_truncate_text_shadowing_regression() -> None:
     truncation path end-to-end through TurnWriter (where the helper now lives).
     """
 
+    from unittest.mock import MagicMock
+
+    from pythinker.agent.checkpoint import CheckpointManager
     from pythinker.agent.loop import AgentLoop
     from pythinker.agent.turn_writer import TurnWriter
 
@@ -26,7 +29,12 @@ def test_sanitize_persisted_blocks_truncate_text_shadowing_regression() -> None:
     assert "should_truncate_text" in impl_sig.parameters
     assert "truncate_text" not in impl_sig.parameters
 
-    writer = TurnWriter(max_tool_result_chars=5)
+    sessions = MagicMock()
+    writer = TurnWriter(
+        sessions=sessions,
+        checkpoint=CheckpointManager(sessions=sessions),
+        max_tool_result_chars=5,
+    )
     content = [{"type": "text", "text": "0123456789"}]
     out = writer.sanitize_persisted_blocks(content, should_truncate_text=True)
     assert isinstance(out, list)

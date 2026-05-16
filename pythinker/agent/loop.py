@@ -289,7 +289,11 @@ class AgentLoop:
             cache_max=self._session_cache_max,
         )
         self.checkpoint = CheckpointManager(sessions=self.sessions)
-        self.turn_writer = TurnWriter(max_tool_result_chars=self.max_tool_result_chars)
+        self.turn_writer = TurnWriter(
+            sessions=self.sessions,
+            checkpoint=self.checkpoint,
+            max_tool_result_chars=self.max_tool_result_chars,
+        )
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
         self.task_store = TaskStore(self.workspace)
@@ -1346,16 +1350,7 @@ class AgentLoop:
         # doesn't silently lose the prompt on recovery. ``media`` rides along
         # as raw on-disk paths — sanitized image blocks are stripped from
         # JSONL, and webui replay needs the paths to mint signed URLs.
-        user_persisted_early = False
-        media_paths = [p for p in (msg.media or []) if isinstance(p, str) and p]
-        has_text = isinstance(msg.content, str) and msg.content.strip()
-        if has_text or media_paths:
-            extra: dict[str, Any] = {"media": list(media_paths)} if media_paths else {}
-            text = msg.content if isinstance(msg.content, str) else ""
-            session.add_message("user", text, **extra)
-            self._mark_pending_user_turn(session)
-            self.sessions.save(session)
-            user_persisted_early = True
+        user_persisted_early = self.turn_writer.persist_user_message_early(msg, session)
 
         final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
             initial_messages,

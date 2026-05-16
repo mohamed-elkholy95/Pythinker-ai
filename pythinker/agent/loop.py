@@ -1255,13 +1255,18 @@ class AgentLoop:
                 session_summary=pending,
                 current_role=current_role,
             )
+            t_wall = time.time()
             final_content, _, all_msgs, _, _ = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
                 pending_queue=pending_queue,
                 msg=msg,
             )
-            self._save_turn(session, all_msgs, 1 + len(history))
+            turn_latency_ms = max(0, int((time.time() - t_wall) * 1000))
+            self._save_turn(
+                session, all_msgs, 1 + len(history),
+                turn_latency_ms=turn_latency_ms,
+            )
             self._clear_runtime_checkpoint(session)
             self.sessions.save(session)
             self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
@@ -1352,6 +1357,7 @@ class AgentLoop:
         # JSONL, and webui replay needs the paths to mint signed URLs.
         user_persisted_early = self.turn_writer.persist_user_message_early(msg, session)
 
+        t_wall = time.time()
         final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
@@ -1366,13 +1372,14 @@ class AgentLoop:
             pending_queue=pending_queue,
             msg=msg,
         )
+        turn_latency_ms = max(0, int((time.time() - t_wall) * 1000))
 
         if final_content is None or not final_content.strip():
             final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 
         # Skip the already-persisted user message when saving the turn
         save_skip = 1 + len(history) + (1 if user_persisted_early else 0)
-        self._save_turn(session, all_msgs, save_skip)
+        self._save_turn(session, all_msgs, save_skip, turn_latency_ms=turn_latency_ms)
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
@@ -1421,8 +1428,15 @@ class AgentLoop:
             drop_runtime=drop_runtime,
         )
 
-    def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
-        self.turn_writer.save_turn(session, messages, skip)
+    def _save_turn(
+        self,
+        session: Session,
+        messages: list[dict],
+        skip: int,
+        *,
+        turn_latency_ms: int | None = None,
+    ) -> None:
+        self.turn_writer.save_turn(session, messages, skip, turn_latency_ms=turn_latency_ms)
 
     def _persist_subagent_followup(self, session: Session, msg: InboundMessage) -> bool:
         return self.turn_writer.persist_subagent_followup(session, msg)

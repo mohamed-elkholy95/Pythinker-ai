@@ -81,6 +81,41 @@ def test_save_turn_strips_runtime_context_prefix_keeps_user_text() -> None:
     assert session.messages[0]["content"] == "the real user message"
 
 
+def test_save_turn_stamps_latency_on_last_assistant_message() -> None:
+    writer = _make_writer()
+    session = Session(key="cli:c")
+    writer.save_turn(
+        session,
+        [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "tool", "tool_call_id": "t", "name": "x", "content": "ok"},
+            {"role": "assistant", "content": "final"},
+        ],
+        skip=1,
+        turn_latency_ms=1234,
+    )
+    # The last assistant message gets the latency stamp; the earlier one doesn't.
+    assistants = [m for m in session.messages if m["role"] == "assistant"]
+    assert len(assistants) == 2
+    assert "latency_ms" not in assistants[0]
+    assert assistants[1]["latency_ms"] == 1234
+
+
+def test_save_turn_skips_latency_when_no_assistant_appended() -> None:
+    """Tool-only continuations have no assistant row, so no stamp lands anywhere."""
+    writer = _make_writer()
+    session = Session(key="cli:c")
+    writer.save_turn(
+        session,
+        [{"role": "tool", "tool_call_id": "t", "name": "x", "content": "ok"}],
+        skip=0,
+        turn_latency_ms=999,
+    )
+    for m in session.messages:
+        assert "latency_ms" not in m
+
+
 def test_save_turn_truncates_oversized_tool_results() -> None:
     writer = _make_writer(max_chars=20)
     session = Session(key="cli:c")

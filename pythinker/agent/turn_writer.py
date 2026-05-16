@@ -90,8 +90,21 @@ class TurnWriter:
 
         return filtered
 
-    def save_turn(self, session: "Session", messages: list[dict], skip: int) -> None:
-        """Save new-turn messages into session, truncating large tool results."""
+    def save_turn(
+        self,
+        session: "Session",
+        messages: list[dict],
+        skip: int,
+        *,
+        turn_latency_ms: int | None = None,
+    ) -> None:
+        """Save new-turn messages into session, truncating large tool results.
+
+        When ``turn_latency_ms`` is provided, stamps it as ``latency_ms`` on
+        the last assistant message appended in this call. No-op for turns
+        that did not append an assistant row (e.g. tool-only continuations).
+        """
+        last_assistant_idx: int | None = None
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
@@ -131,6 +144,10 @@ class TurnWriter:
                     entry["content"] = filtered
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
+            if role == "assistant":
+                last_assistant_idx = len(session.messages) - 1
+        if turn_latency_ms is not None and last_assistant_idx is not None:
+            session.messages[last_assistant_idx]["latency_ms"] = int(turn_latency_ms)
         session.updated_at = datetime.now()
 
     def persist_user_message_early(

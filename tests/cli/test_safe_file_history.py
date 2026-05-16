@@ -25,9 +25,9 @@ class TestSafeFileHistory:
 
     def test_emoji_preserved(self, tmp_path):
         hist = SafeFileHistory(str(tmp_path / "history"))
-        hist.store_string("hello 🐍 pythinker")
+        hist.store_string("hello 🤖 pythinker")
         entries = list(hist.load_history_strings())
-        assert entries[0] == "hello 🐍 pythinker"
+        assert entries[0] == "hello 🤖 pythinker"
 
     def test_mixed_unicode_preserved(self, tmp_path):
         """Latin-extended + emoji should pass through cleanly."""

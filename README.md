@@ -2,7 +2,7 @@
   <img src="https://cdn.jsdelivr.net/gh/mohamed-elkholy95/Pythinker-ai@main/webui/public/brand/icon.svg" alt="Pythinker" width="180">
 </p>
 
-<h1 align="center">🐍 Pythinker</h1>
+<h1 align="center">🤖 Pythinker</h1>
 
 <div align="center">
   <p>
@@ -14,7 +14,7 @@
   </p>
 </div>
 
-🐍 **Pythinker** is an open-source tiny agent framework. It keeps the core agent loop compact and readable while still supporting chat channels, long-term memory, MCP, and practical deployment paths — so you can go from local setup to a long-running personal agent with minimal overhead.
+🤖 **Pythinker** is an open-source tiny agent framework. It keeps the core agent loop compact and readable while still supporting chat channels, long-term memory, MCP, and practical deployment paths — so you can go from local setup to a long-running personal agent with minimal overhead.
 
 > Powered by a tiny, multiplexing agent loop: one Python process listens to Slack, Telegram, Discord, WhatsApp, Matrix, MS Teams, email, a WebSocket WebUI, and an OpenAI-compatible HTTP API — all backed by a single session-scoped memory layer.
 
@@ -278,7 +278,7 @@ bun run dev
   <img src="https://cdn.jsdelivr.net/gh/mohamed-elkholy95/Pythinker-ai@main/webui/public/brand/arctecture.webp" alt="Pythinker architecture" width="800">
 </p>
 
-🐍 Pythinker stays tiny by centering everything around a tiny agent loop: messages come in from chat apps, the LLM decides when tools are needed, and memory or skills are pulled in only as context instead of becoming a heavy orchestration layer. That keeps the core path readable and easy to extend, while still letting you add channels, tools, memory, and deployment options without turning the system into a monolith.
+🤖 Pythinker stays tiny by centering everything around a tiny agent loop: messages come in from chat apps, the LLM decides when tools are needed, and memory or skills are pulled in only as context instead of becoming a heavy orchestration layer. That keeps the core path readable and easy to extend, while still letting you add channels, tools, memory, and deployment options without turning the system into a monolith.
 
 See [`docs/ARCHITECTURE.md`](https://github.com/mohamed-elkholy95/Pythinker-ai/blob/main/docs/ARCHITECTURE.md) for a forensic walkthrough of the runtime.
 

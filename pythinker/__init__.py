@@ -26,7 +26,7 @@ def _resolve_version() -> str:
 
 
 __version__ = _resolve_version()
-__logo__ = "🐍"
+__logo__ = "🤖"
 
 from pythinker.pythinker import (  # noqa: E402  -- imported after metadata so submodule can read __version__
     Pythinker,

@@ -298,7 +298,7 @@ Defined in `pythinker/config/schema.py`. Pydantic `BaseSettings` root is `Config
 ### 5.1 `pythinker/` package root
 
 #### `pythinker/__init__.py` — package init + version resolution (LOC 32)
-Exports `__version__`, `__logo__`, `Pythinker`, `RunResult`. `_resolve_version()` tries `importlib.metadata.version("pythinker-ai")` → `_read_pyproject_version()` → hardcoded `"0.1.5.post2"`. `__logo__ = "🐍"`. **Smell**: hardcoded fallback drifts from `pyproject.toml`.
+Exports `__version__`, `__logo__`, `Pythinker`, `RunResult`. `_resolve_version()` tries `importlib.metadata.version("pythinker-ai")` → `_read_pyproject_version()` → hardcoded `"0.1.5.post2"`. `__logo__ = "🤖"`. **Smell**: hardcoded fallback drifts from `pyproject.toml`.
 
 #### `pythinker/__main__.py` — `python -m pythinker` entry (LOC 8)
 Imports and calls `pythinker.cli.commands.app()`.

@@ -4,9 +4,9 @@ Visual idiom matches pythinker's `@clack/prompts` output verbatim:
   ┌  Title              (intro)
   │  body line          (bar)
   │                     (bar_break)
-  ◇  <completed step>   (resolved prompt)
+  ●  <completed step>   (resolved prompt)
   │  <answer>           (resolved answer)
-  ◆  <active step>      (current prompt)
+  ◉  <active step>      (current prompt)
   │  ● Option           (selected)
   │  ○ Option           (unselected)
   └  closing            (outro / abort)
@@ -36,8 +36,9 @@ _OUT: TextIO = sys.stdout
 G_OPEN = "┌"
 G_CLOSE = "└"
 G_BAR = "│"
-G_ACTIVE = "◆"
-G_DONE = "◇"
+G_ACTIVE = "◉"
+G_ACTIVE_QMARK = f"{G_ACTIVE} "
+G_DONE = "●"
 G_OPT_OFF = "○"
 G_OPT_ON = "●"
 G_CHECK_OFF = "□"
@@ -61,10 +62,37 @@ def outro(message: str) -> None:
     _write(f"{G_CLOSE}  {message}\n")
 
 
+def _write_wrapped(prefix: str, text: str, *, continuation_prefix: str | None = None) -> None:
+    """Write text with every terminal-wrapped row on the timeline rail."""
+    continuation_prefix = continuation_prefix if continuation_prefix is not None else prefix
+    width = _terminal_width()
+
+    for raw_line in str(text).splitlines() or [""]:
+        if not raw_line:
+            _write(prefix.rstrip() + "\n")
+            continue
+        wrapped = textwrap.wrap(
+            raw_line,
+            width=max(10, width - len(prefix)),
+            break_long_words=True,
+            break_on_hyphens=False,
+        ) or [""]
+        _write(f"{prefix}{wrapped[0]}\n")
+        continuation_width = max(10, width - len(continuation_prefix))
+        for line in wrapped[1:]:
+            for continuation in textwrap.wrap(
+                line,
+                width=continuation_width,
+                break_long_words=True,
+                break_on_hyphens=False,
+            ) or [""]:
+                _write(f"{continuation_prefix}{continuation}\n")
+
+
 def bar(text: str = "") -> None:
     """Render a single bar-prefixed line."""
     if text:
-        _write(f"{G_BAR}  {text}\n")
+        _write_wrapped(f"{G_BAR}  ", text)
     else:
         _write(f"{G_BAR}\n")
 
@@ -76,32 +104,32 @@ def bar_break() -> None:
 
 def print_status(text: str) -> None:
     """Plain-status line during the wizard (e.g. 'Updated config.json')."""
-    _write(f"{G_BAR}  {text}\n")
+    _write_wrapped(f"{G_BAR}  ", text)
 
 
 def success(title: str, detail: str | None = None) -> None:
-    """Resolved-event block on the timeline: `◇ title / │  detail / │`.
+    """Resolved-event block on the timeline: `● title / │  detail / │`.
 
     Use for in-wizard "completed" status (e.g. OAuth login finished, key
     validated). Keeps the diamond glyph on the same column as the persistent
     `│` bar and emits a trailing `│` so the timeline stays unbroken.
     """
-    _write(f"{G_DONE}  {title}\n")
+    _write_wrapped(f"{G_DONE}  ", title, continuation_prefix=f"{G_BAR}  ")
     if detail:
-        _write(f"{G_BAR}  {detail}\n")
+        _write_wrapped(f"{G_BAR}  ", detail)
     _write(f"{G_BAR}\n")
 
 
 def failure(title: str, detail: str | None = None) -> None:
-    """Resolved-failure block on the timeline: `◇ title / │  detail / │`.
+    """Resolved-failure block on the timeline: `● title / │  detail / │`.
 
     Same shape as ``success`` — kept distinct so callers can signal intent
     even though the rendered glyph is identical (the bar/diamond are
     monochrome by design to preserve column alignment).
     """
-    _write(f"{G_DONE}  {title}\n")
+    _write_wrapped(f"{G_DONE}  ", title, continuation_prefix=f"{G_BAR}  ")
     if detail:
-        _write(f"{G_BAR}  {detail}\n")
+        _write_wrapped(f"{G_BAR}  ", detail)
     _write(f"{G_BAR}\n")
 
 
@@ -124,6 +152,86 @@ def _terminal_width() -> int:
         return min(os.get_terminal_size().columns, 100)
     except OSError:
         return 80
+
+
+def _inquirer_controls(prompt: object) -> list[object]:
+    """Return questionary inquirer controls without importing private classes."""
+    application = getattr(prompt, "application", None)
+    layout = getattr(application, "layout", None)
+    find_all_windows = getattr(layout, "find_all_windows", None)
+    if not callable(find_all_windows):
+        return []
+
+    return [
+        control
+        for window in find_all_windows()
+        if (control := getattr(window, "content", None)).__class__.__name__ == "InquirerControl"
+    ]
+
+
+def _clear_select_default_highlight(prompt: object) -> None:
+    """Keep ``default`` as the initial cursor without styling it as selected.
+
+    questionary treats ``default`` as both the initial row and a selected row.
+    For a single-choice menu that leaves the default option green after the
+    cursor moves elsewhere. Clear that selected marker while preserving
+    ``pointed_at`` so only the hovered row is highlighted.
+    """
+    for control in _inquirer_controls(prompt):
+        if hasattr(control, "selected_options"):
+            control.selected_options = []
+            return
+
+
+def _rail_prefix_tokens(tokens: list[tuple]) -> list[tuple]:
+    """Prefix each rendered inquirer row with the persistent left rail."""
+    out: list[tuple] = []
+    at_line_start = True
+
+    def prefixed() -> None:
+        nonlocal at_line_start
+        if at_line_start:
+            out.append(("class:text", G_BAR))
+            at_line_start = False
+
+    for token in tokens:
+        if len(token) < 2:
+            prefixed()
+            out.append(token)
+            continue
+
+        style, text, *rest = token
+        if not isinstance(text, str):
+            prefixed()
+            out.append(token)
+            continue
+
+        if text == "":
+            prefixed()
+            out.append(token)
+            continue
+
+        for part in text.splitlines(keepends=True):
+            prefixed()
+            out.append((style, part, *rest))
+            if part.endswith("\n"):
+                at_line_start = True
+
+    return out
+
+
+def _align_inquirer_choices_to_rail(prompt: object) -> None:
+    """Render active choice rows on the same left rail as timeline rows."""
+    for control in _inquirer_controls(prompt):
+        if getattr(control, "_pythinker_rail_aligned", False):
+            continue
+        original = control._get_choice_tokens
+
+        def _get_choice_tokens(original=original):
+            return _rail_prefix_tokens(original())
+
+        control._get_choice_tokens = _get_choice_tokens
+        control._pythinker_rail_aligned = True
 
 
 def _truncate_hint(hint: str, *, title: str, display: str) -> str:
@@ -154,7 +262,7 @@ def _truncate_hint(hint: str, *, title: str, display: str) -> str:
 
 
 def note(title: str, body: list[str]) -> None:
-    """Render a `◇ Title ──╮ body ├─╯` info panel.
+    """Render a `● Title ──╮ body ╰─╯` info panel.
 
     Body is auto-wrapped to fit within `terminal_width - 6` (leaving room for
     `│  ` prefix and `  │` suffix). Multiple lines in body are wrapped
@@ -178,7 +286,7 @@ def note(title: str, body: list[str]) -> None:
     box_width = max(box_width, len(title))
     rule_len = box_width + 2
 
-    # ◇  <title> ──...──╮
+    # ●  <title> ──...──╮
     title_line = f"{G_DONE}  {title} {'─' * (rule_len - len(title) - 1)}╮"
     _write(title_line + "\n")
 
@@ -186,8 +294,8 @@ def note(title: str, body: list[str]) -> None:
         padded = line.ljust(box_width)
         _write(f"{G_BAR}  {padded}  {G_BAR}\n")
 
-    # ├─...─╯
-    _write(f"├{'─' * (rule_len + 2)}╯\n")
+    # ╰─...─╯
+    _write(f"╰{'─' * (rule_len + 2)}╯\n")
 
 
 class WizardCancelled(Exception):  # noqa: N818
@@ -195,15 +303,16 @@ class WizardCancelled(Exception):  # noqa: N818
 
 
 def confirm(question: str, *, default: bool = False) -> bool:
-    """Render a `◆ Question? / ○ Yes / ● No` confirm.
+    """Render a `◉ Question? / ○ Yes / ● No` confirm.
 
-    On submit, replaces with `◇ Question? / │ Yes` (or `No`). Returns the bool.
+    On submit, replaces with `● Question? / │ Yes` (or `No`). Returns the bool.
     Raises `WizardCancelled` on Ctrl-C / Esc (questionary returns None).
     """
     # Active state: questionary owns the render area.
     answer = questionary.confirm(
         question,
         default=default,
+        qmark=G_ACTIVE_QMARK,
         style=ONBOARD_QUESTIONARY_STYLE,
     ).ask()
     if answer is None:
@@ -221,7 +330,7 @@ def select(
     default: str | None = None,
     searchable: bool = False,
 ) -> str:
-    """Render `◆ Title / ● Option / ○ Option`. Returns chosen id.
+    """Render `◉ Title / ● Option / ○ Option`. Returns chosen id.
 
     `options[i]` is (id, display, hint). Hint is shown dim after display.
     Raises `WizardCancelled` if the user cancels.
@@ -232,26 +341,27 @@ def select(
     memory for short pickers.
     """
     choices = [
-        questionary.Choice(
-            title=(
-                f"{display}  {_truncate_hint(hint, title=title, display=display)}"
-                if hint
-                else display
-            ),
-            value=opt_id,
-        )
+        questionary.Choice(title=f"{display}  {hint}" if hint else display, value=opt_id)
         for opt_id, display, hint in options
     ]
     # questionary validates `default` against each Choice.value (our opt_id),
     # so pass the id straight through.
-    answer = questionary.select(
+    prompt = questionary.select(
         title,
         choices=choices,
         default=default,
+        qmark=G_ACTIVE_QMARK,
         style=ONBOARD_QUESTIONARY_STYLE,
         use_search_filter=searchable,
         use_jk_keys=not searchable,  # j/k navigation conflicts with search input.
-    ).ask()
+        # We write our own resolved ``● title / │ answer`` record below.
+        # Erasing questionary's answered line lets the active menu show full
+        # option hints without preserving a wrapped, bar-less answer line.
+        erase_when_done=True,
+    )
+    _clear_select_default_highlight(prompt)
+    _align_inquirer_choices_to_rail(prompt)
+    answer = prompt.ask()
     if answer is None:
         raise WizardCancelled(title)
 
@@ -267,11 +377,11 @@ def _rewrite_resolved(title: str, answer: str) -> None:
     """Write the persistent record of a completed prompt.
 
     questionary owns the active-prompt render area while it's interactive.
-    Once it returns, we write a clean `◇ Title / │ Answer / │` block to
+    Once it returns, we write a clean `● Title / │ Answer / │` block to
     record what happened on the bar.
     """
-    _write(f"{G_DONE}  {title}\n")
-    _write(f"{G_BAR}  {answer}\n")
+    _write_wrapped(f"{G_DONE}  ", title, continuation_prefix=f"{G_BAR}  ")
+    _write_wrapped(f"{G_BAR}  ", answer)
     _write(f"{G_BAR}\n")
 
 
@@ -283,6 +393,7 @@ def text(question: str, *, default: str = "") -> str:
     answer = questionary.text(
         question,
         default=default,
+        qmark=G_ACTIVE_QMARK,
         style=ONBOARD_QUESTIONARY_STYLE,
     ).ask()
     if answer is None:
@@ -319,11 +430,14 @@ def multiselect(
     # so no translation needed here. Defaults are set via Choice.checked above.
     # Append a hint so users know SPACE toggles a row (Enter only confirms the
     # current set — without this, hitting Enter on a row submits an empty list).
-    answer = questionary.checkbox(
+    prompt = questionary.checkbox(
         f"{title}  (space to toggle, enter to confirm)",
         choices=choices,
+        qmark=G_ACTIVE_QMARK,
         style=ONBOARD_QUESTIONARY_STYLE,
-    ).ask()
+    )
+    _align_inquirer_choices_to_rail(prompt)
+    answer = prompt.ask()
     if answer is None:
         raise WizardCancelled(title)
 
@@ -337,7 +451,7 @@ SPIN_FRAMES = ["◐", "◓", "◑", "◒"]
 
 @contextlib.contextmanager
 def spinner(label: str):
-    """Animated `◑` spinner. On exit, rewrites as `◇ <label>.`.
+    """Animated `◑` spinner. On exit, rewrites as `● <label>.`.
 
     Use as a context manager:
 
@@ -384,8 +498,8 @@ class _ProgressHandle:
 
     Thread-safe stop; double-stop is a no-op. Final line is one of:
 
-    - ``◇  <last-label>.``   (success — default)
-    - ``◇  <success_label>``  (override via ``stop(success_label=...)``)
+    - ``●  <last-label>.``   (success — default)
+    - ``●  <success_label>``  (override via ``stop(success_label=...)``)
     - blank-rewrite + nothing if ``stop(success_label="")`` (silent stop).
     """
 
@@ -417,9 +531,9 @@ class _ProgressHandle:
     def stop(self, success_label: str | None = None) -> None:
         """Stop the animation and write the final line.
 
-        ``success_label=None`` (default) → ``◇  <last-label>.``.
+        ``success_label=None`` (default) → ``●  <last-label>.``.
         ``success_label=""`` → silent stop; just clears the spin line.
-        ``success_label="X"`` → ``◇  X``.
+        ``success_label="X"`` → ``●  X``.
         """
         with self._lock:
             if self._stopped:

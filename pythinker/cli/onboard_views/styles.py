@@ -6,7 +6,7 @@ from prompt_toolkit.styles import Style
 
 # Match the green active-row treatment used by the settings field editor.
 ONBOARD_GREEN_HOVER = "fg:ansigreen bold noinherit"
-ONBOARD_CYAN_QUESTION = "fg:cyan"
+ONBOARD_CYAN_QUESTION = "fg:#9277c4"
 
 ONBOARD_QUESTIONARY_STYLE = Style.from_dict(
     {

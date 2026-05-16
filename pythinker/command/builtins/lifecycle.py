@@ -382,7 +382,7 @@ def build_help_text() -> str:
     """
     from pythinker.command.metadata import BUILTIN_COMMAND_METADATA
 
-    lines = ["🐍 pythinker commands:"]
+    lines = ["🤖 pythinker commands:"]
     for meta in BUILTIN_COMMAND_METADATA:
         lines.append(f"{meta.name} — {meta.summary}")
     return "\n".join(lines)

@@ -620,7 +620,7 @@ async def test_inline_command_dispatch_persists_command_turn(tmp_path: Path) -> 
     await loop._dispatch_command_inline(msg, msg.session_key, "/help", loop.commands.dispatch)
 
     outbound = await asyncio.wait_for(loop.bus.consume_outbound(), timeout=1)
-    assert outbound.content.startswith("🐍 pythinker commands:")
+    assert outbound.content.startswith("🤖 pythinker commands:")
     session = loop.sessions.get_or_create("cli:test")
     assert [m.get("_command") for m in session.messages] == [True, True]
     await loop.close_mcp()

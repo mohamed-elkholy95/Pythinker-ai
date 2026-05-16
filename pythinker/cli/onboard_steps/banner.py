@@ -42,7 +42,7 @@ def _step_outro(ctx: _WizardContext) -> StepResult:
     from pythinker.cli import onboard as _onboard
     from pythinker.cli.onboard_views import clack
 
-    clack.outro("🐍 Pythinker is ready.")
+    clack.outro("🤖 Pythinker is ready.")
     _onboard.console.print("\nNext:")
     _onboard.console.print("  pythinker tui         full-screen chat")
     _onboard.console.print("  pythinker agent       terminal chat / one-shot prompts")

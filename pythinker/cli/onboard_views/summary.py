@@ -147,7 +147,7 @@ def render_pre_save_diff(
 
 
 def render_existing_summary(cfg: Config) -> None:
-    """Print the `◇ Existing config ─╮ … ╯` panel for step 4."""
+    """Print the `● Existing config ─╮ … ╯` panel for step 4."""
     from pythinker.providers.registry import PROVIDERS
     default_provider = None
     for spec in PROVIDERS:

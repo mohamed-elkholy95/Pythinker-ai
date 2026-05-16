@@ -1,10 +1,9 @@
 """Tests for ``clack._truncate_hint``.
 
-The hint shown next to each questionary Choice contributes to the
-recorded `?  Title  Display Hint` line questionary writes after the
-user picks. If that line wraps, the wrap continuation has no `│` left
-bar — visually breaking clack's persistent timeline. Trimming the
-hint to fit terminal width keeps the record on one line.
+Checkbox prompts still preserve questionary's completed answer line. If
+that line wraps, the wrap continuation has no `│` left bar — visually
+breaking clack's persistent timeline. Trimming checkbox hints to fit
+terminal width keeps that record on one line.
 """
 
 from __future__ import annotations
@@ -31,9 +30,8 @@ def test_empty_hint_passes_unchanged():
 
 
 def test_long_hint_is_ellipsized_to_fit_terminal():
-    """Reproduces the screenshot: 70-col terminal, title 'What would you
-    like to do?', display 'Use existing', long hint that previously
-    wrapped — must come back ellipsized so the recorded answer line
+    """At 70 columns, a title/display/hint combination that would wrap
+    must come back ellipsized so the recorded checkbox answer line
     stays single-line."""
     with _at(70):
         out = _truncate_hint(

@@ -32,7 +32,7 @@ if (!TOKEN) {
   process.exit(1);
 }
 
-console.log('🐍 pythinker WhatsApp Bridge');
+console.log('🤖 pythinker WhatsApp Bridge');
 console.log('========================\n');
 
 const server = new BridgeServer(PORT, AUTH_DIR, TOKEN);

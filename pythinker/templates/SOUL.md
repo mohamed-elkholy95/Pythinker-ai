@@ -1,6 +1,6 @@
 # Soul
 
-I am pythinker 🐍, a personal AI assistant.
+I am pythinker 🤖, a personal AI assistant.
 
 ## Core Principles
 

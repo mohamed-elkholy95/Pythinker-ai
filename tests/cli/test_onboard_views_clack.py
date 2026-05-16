@@ -35,23 +35,47 @@ def test_bar_break_emits_blank_pipe():
     assert out == "│\n"
 
 
+def test_success_wraps_continuation_on_bar():
+    with patch("pythinker.cli.onboard_views.clack._terminal_width", return_value=36):
+        out = _capture(
+            clack.success,
+            "Authenticated with OpenAI Codex using browser login",
+            "3ee6edc3-84ea-42f6-b457-03672c01788c",
+        )
+    lines = out.splitlines()
+    assert lines[0].startswith("●  Authenticated")
+    assert any(line.startswith("│  using") for line in lines)
+    assert all(line.startswith(("●", "│")) for line in lines)
+
+
 def test_print_status_uses_bar_prefix():
     out = _capture(clack.print_status, "Updated config.json")
     assert out == "│  Updated config.json\n"
 
 
+def test_print_status_wraps_continuation_on_bar():
+    with patch("pythinker.cli.onboard_views.clack._terminal_width", return_value=32):
+        out = _capture(
+            clack.print_status,
+            "Docs: https://github.com/mohamed-elkholy95/pythinker/blob/main/docs/security.md",
+        )
+    lines = out.splitlines()
+    assert len(lines) > 1
+    assert all(line.startswith("│") for line in lines)
+
+
 def test_note_panel_minimal():
     out = _capture(clack.note, "Title", ["body"])
     lines = out.splitlines()
-    # ◇  Title ──────╮
+    # ●  Title ──────╮
     # │              │
     # │  body        │
     # │              │
-    # ├──────────────╯
-    assert lines[0].startswith("◇  Title")
+    # ╰──────────────╯
+    assert lines[0].startswith("●  Title")
     assert lines[0].endswith("╮")
     assert any(line.startswith("│") and "body" in line for line in lines)
-    assert lines[-1].startswith("├") and lines[-1].endswith("╯")
+    assert lines[-1].startswith("╰") and lines[-1].endswith("╯")
 
 
 def test_note_panel_wraps_long_body():
@@ -92,12 +116,13 @@ def test_confirm_yes():
     with patch("pythinker.cli.onboard_views.clack.questionary") as q:
         q.confirm.return_value.ask.return_value = True
         out = _capture(clack.confirm, "Continue?", default=False)
-    # Should render ◇ Continue? / │ Yes after submit.
-    assert "◇  Continue?" in out
+    # Should render ● Continue? / │ Yes after submit.
+    assert "●  Continue?" in out
     assert "│  Yes" in out
     q.confirm.assert_called_once_with(
         "Continue?",
         default=False,
+        qmark=clack.G_ACTIVE_QMARK,
         style=ONBOARD_QUESTIONARY_STYLE,
     )
 
@@ -106,8 +131,25 @@ def test_confirm_no():
     with patch("pythinker.cli.onboard_views.clack.questionary") as q:
         q.confirm.return_value.ask.return_value = False
         out = _capture(clack.confirm, "Continue?", default=False)
-    assert "◇  Continue?" in out
+    assert "●  Continue?" in out
     assert "│  No" in out
+
+
+def test_confirm_wraps_resolved_question_continuation_on_bar():
+    question = (
+        "I understand this is personal-by-default and shared/multi-user use requires "
+        "lock-down. Continue?"
+    )
+    with (
+        patch("pythinker.cli.onboard_views.clack._terminal_width", return_value=54),
+        patch("pythinker.cli.onboard_views.clack.questionary") as q,
+    ):
+        q.confirm.return_value.ask.return_value = True
+        out = _capture(clack.confirm, question, default=False)
+    lines = out.splitlines()
+    assert lines[0].startswith("●  I understand")
+    assert any(line.startswith("│  shared/multi-user") for line in lines)
+    assert all(line.startswith(("●", "│")) for line in lines)
 
 
 def test_confirm_cancelled_raises():
@@ -129,7 +171,7 @@ def test_select_returns_chosen_value():
             ],
             default="quickstart",
         )
-    assert "◇  Setup mode" in out
+    assert "●  Setup mode" in out
     assert "│  Manual" in out
 
 
@@ -149,7 +191,7 @@ def test_multiselect_returns_list():
             options=[("a", "A", ""), ("b", "B", ""), ("c", "C", "")],
             defaults=["a"],
         )
-    assert "◇  Pick channels" in out
+    assert "●  Pick channels" in out
     assert "│  A, C" in out
 
 
@@ -161,7 +203,7 @@ def test_multiselect_none_selected_shows_none():
             "Pick channels",
             options=[("a", "A", ""), ("b", "B", "")],
         )
-    assert "◇  Pick channels" in out
+    assert "●  Pick channels" in out
     assert "│  (none)" in out
 
 
@@ -169,7 +211,7 @@ def test_text_returns_string():
     with patch("pythinker.cli.onboard_views.clack.questionary") as q:
         q.text.return_value.ask.return_value = "hello"
         out = _capture(clack.text, "Workspace?", default="~/.pythinker/workspace")
-    assert "◇  Workspace?" in out
+    assert "●  Workspace?" in out
     assert "│  hello" in out
 
 
@@ -187,12 +229,12 @@ def test_spinner_writes_label_and_finalizes():
             pass
     captured = buf.getvalue()
     assert "Working" in captured
-    # Spinner replaces with ◇ on context exit.
-    assert "◇" in captured
+    # Spinner replaces with ● on context exit.
+    assert "●" in captured
 
 
 def test_progress_handle_default_finalizes_with_label_and_period():
-    """``progress(label).stop()`` writes ``◇  <label>.`` as the final line —
+    """``progress(label).stop()`` writes ``●  <label>.`` as the final line —
     mirrors pythinker's prompter.progress() default success render."""
     buf = StringIO()
     with patch.object(clack, "_OUT", buf):
@@ -200,19 +242,19 @@ def test_progress_handle_default_finalizes_with_label_and_period():
         prog.stop()
     captured = buf.getvalue()
     assert "Loading models" in captured
-    assert "◇" in captured
+    assert "●" in captured
     assert captured.rstrip().endswith("Loading models.")
 
 
 def test_progress_handle_stop_with_success_label_overrides_default():
-    """Passing ``success_label="Done"`` writes ``◇  Done`` (no period) so
+    """Passing ``success_label="Done"`` writes ``●  Done`` (no period) so
     callers can announce a different message at the success line."""
     buf = StringIO()
     with patch.object(clack, "_OUT", buf):
         prog = clack.progress("Working")
         prog.stop(success_label="Done")
     out = buf.getvalue()
-    assert "◇  Done" in out
+    assert "●  Done" in out
     # Final label should not still have the in-progress wording.
     assert "Working." not in out.rstrip().split("\n")[-1]
 
@@ -226,7 +268,7 @@ def test_progress_handle_silent_stop_writes_no_check_mark():
         prog = clack.progress("Working")
         prog.stop(success_label="")
     out = buf.getvalue()
-    assert "◇" not in out
+    assert "●" not in out
 
 
 def test_progress_handle_double_stop_is_noop():
@@ -295,7 +337,87 @@ def test_select_default_passed_as_choice_value():
     assert result == "openai_codex"
     assert len(captured_calls) == 1
     assert captured_calls[0]["default"] == "openai_codex"
+    assert captured_calls[0]["kwargs"]["qmark"] == clack.G_ACTIVE_QMARK
     assert captured_calls[0]["kwargs"]["style"] is ONBOARD_QUESTIONARY_STYLE
+
+
+def test_select_keeps_full_hint_and_erases_questionary_answer_line():
+    """Long inline hints should remain visible in the active menu.
+
+    ``erase_when_done`` prevents questionary's completed ``? title answer``
+    line from wrapping without the clack left bar; clack writes its own compact
+    resolved record after the prompt returns.
+    """
+    captured: dict = {}
+
+    def fake_select(title, choices, default, **kwargs):
+        captured.update({"choices": choices, "kwargs": kwargs})
+        return type("R", (), {"ask": lambda self: choices[0].value})()
+
+    with (
+        patch("pythinker.cli.onboard_views.clack._terminal_width", return_value=40),
+        patch("pythinker.cli.onboard_views.clack.questionary.select", side_effect=fake_select),
+    ):
+        clack.select(
+            "What would you like to do?",
+            options=[
+                ("use-existing", "Use existing", "Load current config; refresh new schema fields."),
+            ],
+            default="use-existing",
+        )
+
+    assert captured["choices"][0].title == (
+        "Use existing  Load current config; refresh new schema fields."
+    )
+    assert captured["kwargs"]["qmark"] == clack.G_ACTIVE_QMARK
+    assert captured["kwargs"]["erase_when_done"] is True
+
+
+def test_select_default_starts_cursor_without_stale_green_selection():
+    """The default row should not stay highlighted after moving to another row."""
+    import questionary
+
+    prompt = questionary.select(
+        "Setup mode",
+        choices=[
+            questionary.Choice(title="QuickStart  Minimal prompts", value="quickstart"),
+            questionary.Choice(title="Manual  Walk every section", value="manual"),
+        ],
+        default="manual",
+    )
+
+    controls = clack._inquirer_controls(prompt)
+    assert len(controls) == 1
+    control = controls[0]
+    assert control.pointed_at == 1
+    assert control.selected_options == ["manual"]
+
+    clack._clear_select_default_highlight(prompt)
+
+    assert control.pointed_at == 1
+    assert control.selected_options == []
+
+
+def test_select_active_choice_rows_stay_on_timeline_rail():
+    import questionary
+
+    prompt = questionary.select(
+        "Setup mode",
+        choices=[
+            questionary.Choice(title="QuickStart  Minimal prompts", value="quickstart"),
+            questionary.Choice(title="Manual  Walk every section", value="manual"),
+        ],
+        default="manual",
+    )
+    control = clack._inquirer_controls(prompt)[0]
+
+    clack._align_inquirer_choices_to_rail(prompt)
+
+    rendered = "".join(token[1] for token in control._get_choice_tokens() if len(token) >= 2)
+    choice_lines = [line for line in rendered.splitlines() if line]
+    assert choice_lines
+    assert all(line.startswith("│") for line in choice_lines)
+    assert any("Manual" in line for line in choice_lines)
 
 
 def test_select_searchable_flag_threads_to_questionary():
@@ -318,6 +440,7 @@ def test_select_searchable_flag_threads_to_questionary():
         )
 
     assert captured.get("style") is ONBOARD_QUESTIONARY_STYLE
+    assert captured.get("qmark") == clack.G_ACTIVE_QMARK
     assert captured.get("use_search_filter") is True
     assert captured.get("use_jk_keys") is False
 
@@ -334,6 +457,7 @@ def test_select_searchable_flag_defaults_off():
     with patch("pythinker.cli.onboard_views.clack.questionary.select", side_effect=fake_select):
         clack.select("Pick one", options=[("a", "Alpha", "")], default="a")
 
+    assert captured.get("qmark") == clack.G_ACTIVE_QMARK
     assert captured.get("use_search_filter") is False
     assert captured.get("use_jk_keys") is True
 

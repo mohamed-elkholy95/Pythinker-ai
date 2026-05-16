@@ -483,7 +483,7 @@ def _select_with_back(
         menu_height += 2
     menu_window = Window(content=menu_control, height=menu_height)
 
-    prompt_control = FormattedTextControl(lambda: [("class:question", f"◆  {prompt}")])
+    prompt_control = FormattedTextControl(lambda: [("class:question", f"◉  {prompt}")])
     # always_hide_cursor: prompt_toolkit otherwise parks its block cursor on the
     # first cell of the focused control, which lands on top of the ● glyph and
     # reads as a hover/highlight artefact.
@@ -738,7 +738,7 @@ def _get_constraint_hint(field_info) -> str:
 def _show_config_panel(display_name: str, model: BaseModel, fields: list) -> None:
     """Display current configuration as a rich table."""
     table = Table(show_header=False, box=None, padding=(0, 2))
-    table.add_column("Field", style="cyan")
+    table.add_column("Field", style="#9277c4")
     table.add_column("Value")
 
     for fname, field_info in fields:
@@ -1439,13 +1439,13 @@ def _configure_provider(config: Config, provider_name: str) -> None:
             if signup_url:
                 console.print(Panel(
                     f"[bold]{display_name}[/bold] needs an API key.\n"
-                    f"Open [cyan]{signup_url}[/cyan] in your browser?"
+                    f"Open [#9277c4]{signup_url}[/#9277c4] in your browser?"
                     + (
                         f"\n[dim]Learn more: {spec.docs_url}[/dim]"
                         if (spec and spec.docs_url) else ""
                     ),
                     title="API key",
-                    border_style="cyan",
+                    border_style="#9277c4",
                 ))
                 if _get_questionary().confirm(
                     "Open browser now?",
@@ -1649,7 +1649,7 @@ def _minimax_followup_plan_tier_step(config: Config, region: str) -> None:
         config.agents.defaults.model = chosen_model
     else:
         console.print(
-            f"[dim]Tip: set [cyan]agents.defaults.model[/cyan] to "
+            f"[dim]Tip: set [#9277c4]agents.defaults.model[/#9277c4] to "
             f"[bold]{chosen_model}[/bold] to use it as the default. "
             f"Current default: {config.agents.defaults.model}[/dim]"
         )
@@ -1972,7 +1972,7 @@ def _print_summary_panel(rows: list[tuple[str, str]], title: str) -> None:
     if not rows:
         return
     table = Table(show_header=False, box=None, padding=(0, 2))
-    table.add_column("Setting", style="cyan")
+    table.add_column("Setting", style="#9277c4")
     table.add_column("Value")
     for field_name, value in rows:
         table.add_row(field_name, value)

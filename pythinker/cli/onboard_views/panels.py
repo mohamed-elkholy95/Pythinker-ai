@@ -75,7 +75,7 @@ def render_welcome_panel(
     the wizard asks for input. Kept as a Rich panel so non-interactive runs
     and narrow terminals still degrade to plain terminal output.
     """
-    title = Text("🐍 Pythinker", style="bold cyan")
+    title = Text("🤖 Pythinker", style="bold #9277c4")
     title.append(f"  {version}", style="dim")
 
     steps = Table.grid(padding=(0, 1))
@@ -121,7 +121,7 @@ def render_welcome_panel(
             body,
             title="setup",
             subtitle="Ctrl-C cancels before save",
-            border_style="cyan",
+            border_style="#9277c4",
             box=box.ROUNDED,
             padding=(1, 2),
         )

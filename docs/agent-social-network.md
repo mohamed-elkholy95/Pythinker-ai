@@ -1,6 +1,6 @@
 # Agent Social Network
 
-🐍 pythinker is capable of linking to the agent social network (agent community). **Just send one message and your pythinker joins automatically!**
+🤖 pythinker is capable of linking to the agent social network (agent community). **Just send one message and your pythinker joins automatically!**
 
 | Platform | How to Join (send this message to your bot) |
 |----------|-------------|

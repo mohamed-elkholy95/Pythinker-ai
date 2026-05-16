@@ -203,8 +203,7 @@ class ChatPane:
         title = Text.from_markup(f"[bold {accent}]Pythinker[/]"
                                  f" [bold {accent}]v{version}[/]")
 
-        # Mascot: pythinker is a snake-themed project (`__logo__ = "🐍"`).
-        mascot = Text("🐍", style=f"bold {accent}", justify="center")
+        mascot = Text("🤖", style=f"bold {accent}", justify="center")
 
         # Left column: welcome + mascot + model line + workspace.
         provider_line = " · ".join(x for x in (model, provider) if x) \

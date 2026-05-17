@@ -806,15 +806,20 @@ async def test_cancel_typing_skips_wait_when_already_visible():
     assert typing_task.cancelled()
 
 
-def test_reconnect_delay_capped_exponential():
+def test_reconnect_delay_capped_exponential_then_slow_tail():
     ch = WhatsAppChannel({"enabled": True, "reconnectJitter": 0}, MagicMock())
-    # initial 2s, factor 1.4, max 120s
+    # initial 2s, factor 1.4; after 10 attempts, keep retrying but slow the cadence.
     d0 = ch._reconnect_delay_seconds(0)
     d1 = ch._reconnect_delay_seconds(1)
+    d9 = ch._reconnect_delay_seconds(9)
+    d10 = ch._reconnect_delay_seconds(10)
     d_huge = ch._reconnect_delay_seconds(50)
     assert abs(d0 - 2.0) < 0.01
     assert abs(d1 - 2.8) < 0.01
-    assert d_huge <= 120.0
+    assert 40.0 < d9 < 43.0
+    assert d10 > d9
+    assert d10 > 100.0
+    assert 590.0 <= d_huge <= 600.0
 
 
 # ---------------------------------------------------------------------------

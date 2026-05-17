@@ -234,6 +234,7 @@ Useful WhatsApp options:
 | `typingIntervalSeconds` / `typingMinVisibleMs` | Tune typing refresh cadence and minimum visible duration. |
 | `textChunkLimit` / `chunkMode` | Split long outbound replies before sending to WhatsApp. |
 | `mediaMaxMb` | Skip outbound media above this size. |
+| `reconnectInitialMs` / `reconnectMaxMs` / `reconnectFactor` / `reconnectJitter` | Tune WhatsApp bridge reconnect backoff. Retries continue indefinitely, but after 10 failed attempts Pythinker stretches the interval up to a longer cap to reduce log/process churn. |
 
 > WhatsApp bridge updates are not applied automatically for existing installations.
 > After upgrading pythinker, rebuild the local bridge with:

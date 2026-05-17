@@ -13,6 +13,8 @@ All notable user-visible changes to Pythinker land here. The project follows
   session objects from bridge console output.
 - WhatsApp bridge startup now reports a friendly port-in-use error instead of an unhandled
   WebSocket server exception when another bridge is already bound to the same port.
+- WhatsApp bridge reconnects keep retrying indefinitely, but after 10 failed attempts the
+  retry interval stretches further to reduce repeated connection churn while the bridge is down.
 
 ## [2.5.1] - 2026-05-17
 

@@ -50,6 +50,11 @@ CONFIG_FIELDS = {
 # Fallback typing refresh when config is missing; 6s stays comfortably under
 # Baileys' ~10s presence expiry.
 PRESENCE_REFRESH_SECONDS = 6
+# Keep retrying forever, but after the first 10 fast retries, stretch the
+# interval so a down bridge does not spam logs/process restarts indefinitely.
+RECONNECT_SLOW_AFTER_ATTEMPTS = 10
+RECONNECT_EXTENDED_MAX_MULTIPLIER = 5.0
+RECONNECT_EXTENDED_MAX_SECONDS = 600.0
 PresenceState = Literal["available", "unavailable", "composing", "recording", "paused"]
 
 
@@ -276,10 +281,27 @@ class WhatsAppChannel(BaseChannel):
                     await asyncio.sleep(delay)
 
     def _reconnect_delay_seconds(self, attempt: int) -> float:
-        """Capped exponential backoff with symmetric jitter."""
+        """Capped exponential backoff with slower long-tail retries after 10 attempts."""
         cfg = self.config
-        base = (cfg.reconnect_initial_ms / 1000.0) * (cfg.reconnect_factor ** attempt)
-        capped = min(base, cfg.reconnect_max_ms / 1000.0)
+        normalized_attempt = max(0, attempt)
+        normal_max = max(0.1, cfg.reconnect_max_ms / 1000.0)
+        base = (cfg.reconnect_initial_ms / 1000.0) * (
+            cfg.reconnect_factor ** normalized_attempt
+        )
+        capped = min(base, normal_max)
+
+        if normalized_attempt >= RECONNECT_SLOW_AFTER_ATTEMPTS:
+            slow_attempt = normalized_attempt - RECONNECT_SLOW_AFTER_ATTEMPTS + 1
+            extended_max = max(
+                normal_max,
+                min(
+                    RECONNECT_EXTENDED_MAX_SECONDS,
+                    normal_max * RECONNECT_EXTENDED_MAX_MULTIPLIER,
+                ),
+            )
+            slow_step = max(30.0, normal_max / 2.0)
+            capped = min(extended_max, capped + (slow_step * slow_attempt))
+
         jitter = cfg.reconnect_jitter
         if jitter:
             capped *= 1 + random.uniform(-jitter, jitter)

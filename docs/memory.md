@@ -43,6 +43,17 @@ Each line is a JSON object:
 
 It is not the final memory. It is the material from which final memory is shaped.
 
+#### Compaction zones
+
+Turn-start consolidation and in-turn snipping share one `BudgetPolicy` derived from the model window and output reserve:
+
+- **green**: prompt estimate is below `target`; no consolidation is needed.
+- **amber**: between `target` and `soft`; background consolidation may run, but the turn can proceed.
+- **red**: between `soft` and `hard`; foreground consolidation summarizes old safe slices before the model call.
+- **critical**: at or above `hard`; the runner's last-resort snip path trims the model-visible prompt so the request fits.
+
+The layers are ordered to preserve information: L0 idle auto-compact archives inactive sessions, L1 turn-start consolidation summarizes old turns in-band, and L3 in-turn governance first microcompacts eligible old tool results before falling back to snip. Relaxed boundary selection means assistant/tool stretches are summarized instead of silently falling through to lossy snip.
+
 ### Stage 2: Dream
 
 `Dream` is the slower, more thoughtful layer. It runs on a cron schedule by default and can also be triggered manually.

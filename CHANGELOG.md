@@ -6,6 +6,27 @@ All notable user-visible changes to Pythinker land here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- Provider-aware model metadata registry with checked-in curated model limits, source/confidence tracking, user overrides, and Azure deployment-to-base-model mapping. Runtime startup remains offline by default.
+- Per-model context-window profiles are used automatically when `contextWindowTokens` is unset, including Codex OAuth GPT-5.5 at 400k total / 272k input / 128k output and direct/gateway profiles with provider-specific limits and tokenizer encodings.
+- Native Anthropic providers can count tokens via `POST /v1/messages/count_tokens` with a 60s in-memory TTL cache and 429-aware retry.
+- `BudgetPolicy` unifies consolidator and runner snip budget math and clamps invalid output reserves instead of crashing a turn.
+- WebUI usage displays a stacked `floor / history / headroom` bar with `floor_status`, and assistant turns emit a PII-safe structured `context_turn` event for estimator drift tracking.
+
+### Fixed
+
+- Progressive suffix matching now resolves multi-slash gateway model ids such as `openrouter/anthropic/claude-opus-4-7`.
+- Consolidator boundary selection has a relaxed fallback for assistant/tool stretches, and token probes include the real incoming user message instead of a placeholder.
+- Background auto-compact archives acquire the per-session lock via an injected lock provider, preventing concurrent archive from swapping the session while a turn is assembling context.
+- `derive_window` is defensive against provider subclasses that raise from `get_model_limits`.
+
+### Changed
+
+- Microcompact eligibility is now determined by `Tool.compactable` rather than a hardcoded tool-name set, so MCP tool results are eligible by default while side-effect tools opt out.
+- `clamp_context_window` is preserved as an alias for the new `derive_window` helper.
+- The maintainer metadata refresh tool writes atomically, supports strict parser-regression exits, and can refresh provider snapshots from supported public metadata APIs.
+
 ## [2.4.0] - 2026-05-15
 
 ### Added

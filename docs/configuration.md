@@ -936,7 +936,7 @@ The `agents.defaults` block governs the agent's runtime parameters. The most com
 | `alternateModels` | `alternate_models` | `[]` | Same-provider model ids surfaced in the WebUI model-switcher dropdown. The active `model` should not appear here — it's added implicitly. |
 | `provider` | `provider` | `auto` | Provider key (e.g. `anthropic`, `openrouter`) or `auto` to derive from the `model` prefix. |
 | `maxTokens` | `max_tokens` | `8192` | Per-call max output tokens. |
-| `contextWindowTokens` | `context_window_tokens` | `65536` | Soft prompt-budget used by the consolidator and the runner's `_snip_history`. |
+| `contextWindowTokens` | `context_window_tokens` | *(auto)* | Soft prompt-budget used by the consolidator and the runner's `_snip_history`. When unset, derived from the model profile (`gpt-5.5` → 272 000 on the Codex OAuth profile, `gpt-5.4` → 128 000, Claude 4.x → ≥200 000). Set explicitly only to lower the cap below what the model supports; values above the provider cap are clamped down. |
 | `temperature` | `temperature` | `0.1` | Sampling temperature. Some providers override this internally (e.g. Moonshot's reasoning models force `1.0`). |
 | `maxToolIterations` | `max_tool_iterations` | `200` | Hard ceiling on per-turn tool loop iterations. |
 | `maxToolResultChars` | `max_tool_result_chars` | `16000` | Per-tool-result truncation budget; spillovers go to `.pythinker/tool-results/`. |
@@ -946,6 +946,39 @@ The `agents.defaults` block governs the agent's runtime parameters. The most com
 | `disabledSkills` | `disabled_skills` | `[]` | Skill names to exclude from loading (see [Disabled Skills](#disabled-skills)). |
 | `idleCompactAfterMinutes` | `session_ttl_minutes` | `0` | Idle threshold before auto-compaction (see [Auto Compact](#auto-compact)). Legacy alias `sessionTtlMinutes` still accepted. |
 | `dream` | `dream` | (defaults) | Memory curator schedule (`intervalH`, `cron`, `modelOverride`, `maxBatchSize`, `maxIterations`, `annotateLineAges`). |
+
+### Per-model context windows
+
+When `agents.defaults.contextWindowTokens` is omitted, pythinker derives the prompt window from checked-in model metadata instead of assuming one global limit. The registry records provider-keyed model ids, input/output/total token limits, tokenizer encoding, source, and confidence. `ModelProfile` remains as a compatibility wrapper for older code paths, while new runtime code reads `ModelMetadata` and `derive_window()`.
+
+Example: with `model = "openai-codex/gpt-5.5"` and no explicit `contextWindowTokens`, the Codex profile resolves to a 400k total context with 272k input tokens and 128k reserved output. The consolidator and runner then use 272 000 as the input window and `BudgetPolicy` derives soft/target/hard zones from that window plus the model's output reserve.
+
+### Model metadata configuration
+
+Runtime startup stays offline by default. Maintainers refresh the checked-in metadata snapshot explicitly with `scripts/update_model_metadata.py`; users can override or map deployment names in config:
+
+```json
+{
+  "models": {
+    "metadataMode": "auto",
+    "metadataCacheTtlHours": 168,
+    "allowOnlineMetadataRefresh": false,
+    "overrides": {
+      "openai-codex/gpt-5.5": {
+        "inputTokens": 272000,
+        "maxOutputTokens": 128000,
+        "totalContextTokens": 400000,
+        "encoding": "o200k_base"
+      }
+    },
+    "azureDeployments": {
+      "prod-agent": "gpt-5.2-codex"
+    }
+  }
+}
+```
+
+`metadataMode = "auto"` uses curated metadata plus local overrides. `azureDeployments` maps an Azure deployment name back to the base model profile so suffix matching and token limits stay accurate.
 
 ## Logging
 

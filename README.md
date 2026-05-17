@@ -17,7 +17,7 @@
 
 > Powered by a tiny, multiplexing agent loop: one Python process listens to Slack, Telegram, Discord, WhatsApp, Matrix, MS Teams, email, a WebSocket WebUI, and an OpenAI-compatible HTTP API — all backed by a single session-scoped memory layer.
 
-> **What's new in 2.5.0** — provider-aware model metadata now drives context-window profiles, Anthropic token counting is available with caching and 429-aware retry, the WebUI shows floor / history / headroom usage bars with cost estimates, and context assembly is more defensive under compacting pressure. See the [changelog](CHANGELOG.md) for details.
+> **What's new in 2.5.1** — WhatsApp now shows typing presence during agent turns, can send read receipts, supports direct-message pairing codes and group allowlists, and adds safer bridge reconnect/socket tuning plus outbound text/media controls. See the [changelog](CHANGELOG.md) for details.
 
 ## 💡 Key Features
 

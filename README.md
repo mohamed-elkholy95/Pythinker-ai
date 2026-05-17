@@ -323,6 +323,8 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 
 **Unsure which branch to target?** See [CONTRIBUTING.md](https://github.com/mohamed-elkholy95/Pythinker-ai/blob/main/CONTRIBUTING.md) for details.
 
+**Releases** — When publishing a new version, keep the README “What's new” callout and [CHANGELOG.md](https://github.com/mohamed-elkholy95/Pythinker-ai/blob/main/CHANGELOG.md) section in sync with the exact release version.
+
 **Roadmap** — Pick an item and [open a PR](https://github.com/mohamed-elkholy95/Pythinker-ai/pulls)!
 
 - **Multi-modal** — See and hear (images, voice, video)

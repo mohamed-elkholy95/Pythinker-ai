@@ -18,7 +18,6 @@ from pythinker.agent import loop_context, loop_reload, loop_tools
 from pythinker.agent.autocompact import AutoCompact
 from pythinker.agent.checkpoint import CheckpointManager
 from pythinker.agent.context import ContextBuilder
-from pythinker.agent.turn_writer import TurnWriter
 from pythinker.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from pythinker.agent.memory import Consolidator, Dream
 from pythinker.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
@@ -27,12 +26,13 @@ from pythinker.agent.task_store import TaskStore
 from pythinker.agent.tools.message import MessageTool
 from pythinker.agent.tools.registry import ToolRegistry
 from pythinker.agent.tools.self import MyTool
+from pythinker.agent.turn_writer import TurnWriter
 from pythinker.bus.events import InboundMessage, OutboundMessage
 from pythinker.bus.queue import MessageBus
 from pythinker.command import CommandContext, CommandRouter, register_builtin_commands
 from pythinker.config.schema import AgentDefaults
 from pythinker.providers.base import LLMProvider
-from pythinker.providers.limits import _clamp_context_window
+from pythinker.providers.limits import derive_window
 from pythinker.runtime.egress import ToolEgressGateway
 from pythinker.runtime.policy import PolicyService
 from pythinker.session.manager import Session, SessionManager
@@ -258,14 +258,10 @@ class AgentLoop:
         self.max_iterations = (
             max_iterations if max_iterations is not None else defaults.max_tool_iterations
         )
-        self.context_window_tokens = _clamp_context_window(
+        self.context_window_tokens = derive_window(
             self.provider,
             self.model,
-            (
-                context_window_tokens
-                if context_window_tokens is not None
-                else defaults.context_window_tokens
-            ),
+            context_window_tokens,
         )
         self.context_block_limit = context_block_limit
         self.max_tool_result_chars = (

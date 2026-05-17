@@ -149,6 +149,7 @@ class AgentRunner:
     def __init__(self, provider: LLMProvider):
         self.provider = provider
         self._tool_is_compactable: Callable[[str], bool] = lambda _name: True
+        self._last_context_stats: dict[str, int | bool] = {}
 
     def bind_tool_registry(self, registry: ToolRegistry) -> None:
         """Use a tool registry to decide whether results may be microcompacted."""
@@ -499,6 +500,8 @@ class AgentRunner:
             if drained_after_max_iterations:
                 had_injections = True
 
+        usage.update(self._last_context_stats)
+        usage.setdefault("prompt_est", 0)
         return AgentRunResult(
             final_content=final_content,
             messages=messages,
@@ -586,8 +589,18 @@ class AgentRunner:
             messages_for_model = self._drop_orphan_tool_results(messages)
             messages_for_model = self._backfill_missing_tool_results(messages_for_model)
             messages_for_model = self._microcompact(messages_for_model)
+            microcompact_count = sum(
+                1 for msg in messages_for_model
+                if isinstance(msg.get("content"), str)
+                and "result omitted" in msg["content"]
+            )
             messages_for_model = self._apply_tool_result_budget(spec, messages_for_model)
+            before_snip_len = len(messages_for_model)
             messages_for_model = self._snip_history(spec, messages_for_model)
+            self._last_context_stats = {
+                "microcompact_count": microcompact_count,
+                "snip_fired": len(messages_for_model) < before_snip_len,
+            }
             # Snipping may have created new orphans; clean them up.
             messages_for_model = self._drop_orphan_tool_results(messages_for_model)
             messages_for_model = self._backfill_missing_tool_results(messages_for_model)

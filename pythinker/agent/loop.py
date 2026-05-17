@@ -408,6 +408,26 @@ class AgentLoop:
     def _refresh_provider_snapshot(self) -> None:
         loop_reload.refresh_provider_snapshot(self)
 
+    def _emit_context_turn_event(self, session: Session, model: str | None = None) -> None:
+        from pythinker.agent.observability import emit_context_turn_event
+
+        last_usage = getattr(self, "_last_usage", {}) or {}
+        prompt_est = int(last_usage.get("prompt_est", 0) or 0)
+        emit_context_turn_event(
+            session_key=session.key,
+            model=model or self.model,
+            window=self.context_window_tokens,
+            floor=0,
+            prompt_est=prompt_est,
+            prompt_actual=last_usage.get("prompt_tokens"),
+            zone=self.consolidator.policy.classify(prompt_est),
+            action="post_turn",
+            snip=bool(last_usage.get("snip_fired", False)),
+            microcompact=int(last_usage.get("microcompact_count", 0) or 0),
+            encoding=getattr(self, "_encoding", "cl100k_base"),
+            metadata_source=getattr(self, "_model_metadata_source", "fallback"),
+        )
+
     def _register_default_tools(self) -> None:
         loop_tools.register_default_tools(self)
 
@@ -1273,6 +1293,7 @@ class AgentLoop:
             )
             self._clear_runtime_checkpoint(session)
             self.sessions.save(session)
+            self._emit_context_turn_event(session)
             self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
             return OutboundMessage(
                 channel=channel,
@@ -1388,6 +1409,7 @@ class AgentLoop:
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
+        self._emit_context_turn_event(session)
         self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
         # Best-effort: name freshly-created webui chats from the first turn so
         # the sidebar shows something meaningful instead of "New chat".

@@ -12,6 +12,8 @@ from typing import Any
 
 from loguru import logger
 
+from pythinker.providers.model_metadata import ModelMetadata
+from pythinker.providers.model_metadata import get_model_metadata as _static_model_metadata
 from pythinker.utils.helpers import image_placeholder_text
 
 
@@ -162,6 +164,19 @@ class LLMProvider(ABC):
         self.api_key = api_key
         self.api_base = api_base
         self.generation: GenerationSettings = GenerationSettings()
+
+    async def list_model_metadata(self) -> list[ModelMetadata]:
+        """Return provider-owned model metadata when available."""
+        return []
+
+    async def get_model_metadata(self, model: str) -> ModelMetadata | None:
+        """Return metadata for ``model`` without forcing providers to know every model."""
+        return _static_model_metadata(model)
+
+    def count_tokens_supported(self, model: str) -> bool:
+        """Return whether the provider can count tokens accurately for ``model``."""
+        metadata = _static_model_metadata(model)
+        return bool(metadata and metadata.count_tokens_supported)
 
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -53,7 +53,12 @@ export interface AdminSessionRow {
   pinned?: boolean;
   archived?: boolean;
   model_override?: string | null;
-  usage: { used: number; limit: number };
+  usage: {
+    used: number;
+    limit: number;
+    floor?: number;
+    floor_status?: "ok" | "unavailable" | "skipped";
+  };
 }
 
 export interface AdminModelRow {

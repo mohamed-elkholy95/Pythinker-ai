@@ -9,6 +9,8 @@ import {
 } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
+import { StackedUsageBar } from "./StackedUsageBar";
+
 import type { AdminSurfaces } from "@/lib/admin-api";
 import { cn } from "@/lib/utils";
 
@@ -198,6 +200,7 @@ function SummaryView({ data }: { data: AdminSurfaces }) {
                   sub={`${s.channel} · ${s.key}`}
                   used={s.usage?.used ?? 0}
                   limit={s.usage?.limit ?? 0}
+                  floor={s.usage?.floor ?? 0}
                 />
               ))}
             </ul>
@@ -261,9 +264,7 @@ function SessionsView({ data }: { data: AdminSurfaces }) {
               sessions.map((s) => {
                 const used = s.usage?.used ?? 0;
                 const limit = s.usage?.limit ?? 0;
-                const pct = limit > 0
-                  ? Math.min(100, Math.round((used / limit) * 100))
-                  : 0;
+                const floor = s.usage?.floor ?? 0;
                 return (
                   <tr key={s.key} className="border-t border-border/50">
                     <td className="max-w-[20rem] truncate px-3 py-2 font-medium">
@@ -276,7 +277,7 @@ function SessionsView({ data }: { data: AdminSurfaces }) {
                       {formatTokens(used)} / {formatTokens(limit)}
                     </td>
                     <td className="px-3 py-2">
-                      <ContextBar used={used} limit={limit} pct={pct} />
+                      <StackedUsageBar floor={floor} used={used} limit={limit} />
                     </td>
                   </tr>
                 );
@@ -550,11 +551,13 @@ function SessionUsageRow({
   sub,
   used,
   limit,
+  floor,
 }: {
   label: string;
   sub: string;
   used: number;
   limit: number;
+  floor: number;
 }) {
   const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
   const hot = pct >= 85;
@@ -574,40 +577,8 @@ function SessionUsageRow({
           </span>
         </div>
       </div>
-      <ContextBar used={used} limit={limit} pct={pct} />
+      <StackedUsageBar floor={floor} used={used} limit={limit} />
     </li>
-  );
-}
-
-function ContextBar({
-  pct,
-}: {
-  used: number;
-  limit: number;
-  pct: number;
-}) {
-  const hot = pct >= 85;
-  const warn = pct >= 60;
-  return (
-    <div
-      className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
-      role="progressbar"
-      aria-valuenow={pct}
-      aria-valuemin={0}
-      aria-valuemax={100}
-    >
-      <div
-        className={cn(
-          "h-full rounded-full transition-[width] duration-300",
-          hot
-            ? "bg-rose-500"
-            : warn
-              ? "bg-amber-500"
-              : "bg-primary/80",
-        )}
-        style={{ width: `${pct}%` }}
-      />
-    </div>
   );
 }
 

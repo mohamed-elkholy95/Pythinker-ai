@@ -1,5 +1,15 @@
 import i18n, { currentLocale } from "@/i18n";
 
+/** Compact human-readable token count: 1234 → "1.23k", 1_500_000 → "1.50M". */
+export function formatTokens(value: number | null | undefined): string {
+  const n = value ?? 0;
+  if (n === 0) return "0";
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000) return `${(n / 1_000).toFixed(2)}k`;
+  return new Intl.NumberFormat().format(n);
+}
+
 /** Truncate the first user message into a chat title. */
 export function deriveTitle(preview: string | undefined, fallback: string): string {
   if (!preview) return fallback;

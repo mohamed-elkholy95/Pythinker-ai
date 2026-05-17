@@ -116,6 +116,8 @@ export async function deleteSession(
 export interface SessionUsage {
   used: number;
   limit: number;
+  floor?: number;
+  floor_status?: "ok" | "unavailable" | "skipped";
 }
 
 export async function fetchSessionUsage(

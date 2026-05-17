@@ -105,6 +105,31 @@ class Consolidator:
 
         return last_boundary
 
+    def pick_consolidation_boundary_relaxed(
+        self,
+        session: Session,
+        tokens_to_remove: int,
+    ) -> tuple[int, int] | None:
+        """Fallback picker for when no user-turn boundary exists in the tail."""
+        start = session.last_consolidated
+        if start >= len(session.messages) or tokens_to_remove <= 0:
+            return None
+
+        strict = self.pick_consolidation_boundary(session, tokens_to_remove)
+        if strict is not None:
+            return strict
+
+        removed_tokens = 0
+        for idx in range(start, len(session.messages)):
+            message = session.messages[idx]
+            removed_tokens += _memory_pkg.estimate_message_tokens(message)
+            if idx == start:
+                continue
+            if message.get("role") == "assistant" and not message.get("tool_calls"):
+                return idx, removed_tokens
+
+        return len(session.messages), removed_tokens
+
     def _cap_consolidation_boundary(
         self,
         session: Session,
@@ -254,7 +279,10 @@ class Consolidator:
                 if estimated <= target:
                     break
 
-                boundary = self.pick_consolidation_boundary(session, max(1, estimated - target))
+                boundary = self.pick_consolidation_boundary_relaxed(
+                    session,
+                    max(1, estimated - target),
+                )
                 if boundary is None:
                     logger.debug(
                         "Token consolidation: no safe boundary for {} (round {})",

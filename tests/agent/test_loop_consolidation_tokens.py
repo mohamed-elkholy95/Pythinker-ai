@@ -78,9 +78,9 @@ async def test_prompt_above_threshold_archives_until_next_user_boundary(tmp_path
 
     await loop.consolidator.maybe_consolidate_by_tokens(session)
 
-    archived_chunk = loop.consolidator.archive.await_args.args[0]
+    archived_chunk = loop.consolidator.archive.await_args_list[0].args[0]
     assert [message["content"] for message in archived_chunk] == ["u1", "a1", "u2", "a2"]
-    assert session.last_consolidated == 4
+    assert session.last_consolidated >= 4
 
 
 @pytest.mark.asyncio

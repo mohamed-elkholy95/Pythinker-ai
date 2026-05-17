@@ -716,7 +716,10 @@ def test_snip_history_truncates_oversized_system_prompt_when_output_exceeds_cont
     monkeypatch.setattr("pythinker.agent.runner.estimate_message_tokens", estimate_tokens)
     monkeypatch.setattr(
         "pythinker.agent.runner.estimate_prompt_tokens_chain",
-        lambda _provider, _model, msgs, _tools: (sum(estimate_tokens(msg) for msg in msgs), "test"),
+        lambda _provider, _model, msgs, _tools, **_kw: (
+            sum(estimate_tokens(msg) for msg in msgs),
+            "test",
+        ),
     )
 
     spec = AgentRunSpec(

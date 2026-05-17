@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from loguru import logger
 
+from pythinker.agent.budget import BudgetPolicy
 from pythinker.agent.hook import AgentHook, AgentHookContext
 from pythinker.agent.tools.registry import ToolRegistry
 from pythinker.providers.base import LLMProvider, LLMResponse, ToolCallRequest
@@ -1150,12 +1151,11 @@ class AgentRunner:
         max_output = spec.max_tokens if isinstance(spec.max_tokens, int) else (
             provider_max_tokens if isinstance(provider_max_tokens, int) else 4096
         )
-        output_reserve = max_output
-        if max_output >= spec.context_window_tokens - _SNIP_SAFETY_BUFFER:
-            output_reserve = max(256, spec.context_window_tokens // 4)
-        budget = spec.context_block_limit or (
-            spec.context_window_tokens - output_reserve - _SNIP_SAFETY_BUFFER
+        policy = BudgetPolicy.for_model(
+            window=spec.context_window_tokens,
+            output_reserve=max_output,
         )
+        budget = spec.context_block_limit or policy.hard
         budget = max(_MIN_SNIP_PROMPT_BUDGET, budget)
 
         estimate, _ = estimate_prompt_tokens_chain(

@@ -146,6 +146,27 @@ def _check_default_model() -> CheckResult:
     return CheckResult("ok", "Default model", model)
 
 
+def _check_model_context_window() -> CheckResult:
+    try:
+        from pythinker.config.loader import load_config
+        from pythinker.providers.model_metadata import get_model_metadata
+
+        config = load_config()
+    except Exception:  # noqa: BLE001
+        return CheckResult("warn", "Model context", "(skipped — config invalid)")
+    model = config.agents.defaults.model
+    configured = config.agents.defaults.context_window_tokens
+    metadata = get_model_metadata(model, config=config)
+    context_window = configured or (metadata.input_tokens if metadata else None) or 65_536
+    source = metadata.source.value if metadata else "fallback"
+    encoding = metadata.encoding if metadata else "cl100k_base"
+    return CheckResult(
+        "ok",
+        "Model context",
+        f"context_window={context_window} source={source} encoding={encoding}",
+    )
+
+
 def _check_default_provider_auth() -> list[CheckResult]:
     """Check auth status for the default provider (and warn on other OAuth providers)."""
     try:
@@ -421,7 +442,7 @@ def _check_updates() -> CheckResult:
 
 _SECTIONS: list[tuple[str, Iterable[Callable[[], CheckResult | list[CheckResult]]]]] = [
     ("Environment", (_check_python_version, _check_install_location)),
-    ("Configuration", (_check_config, _check_workspace, _check_default_model)),
+    ("Configuration", (_check_config, _check_workspace, _check_default_model, _check_model_context_window)),
     ("Providers", (_check_default_provider_auth,)),
     ("Tools", (_check_browser,)),
     ("Updates", (_check_updates,)),

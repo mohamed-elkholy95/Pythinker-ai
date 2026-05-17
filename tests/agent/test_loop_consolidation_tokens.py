@@ -208,6 +208,7 @@ async def test_preflight_consolidation_receives_pending_summary(tmp_path) -> Non
     loop.consolidator.maybe_consolidate_by_tokens.assert_awaited_once_with(
         session,
         session_summary="Previous conversation summary: earlier context",
+        current_message="hello",
     )
 
 

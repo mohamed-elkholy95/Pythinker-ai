@@ -151,13 +151,14 @@ class Consolidator:
         session: Session,
         *,
         session_summary: str | None = None,
+        current_message: str = "[token-probe]",
     ) -> tuple[int, str]:
         """Estimate current prompt size for the normal session history view."""
         history = session.get_history(max_messages=0)
         channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
         probe_messages = self._build_messages(
             history=history,
-            current_message="[token-probe]",
+            current_message=current_message,
             channel=channel,
             chat_id=chat_id,
             session_summary=session_summary,
@@ -175,18 +176,26 @@ class Consolidator:
         session: Session,
         *,
         session_summary: str | None = None,
+        current_message: str = "[token-probe]",
     ) -> tuple[int, str]:
         """Async prompt estimate for consolidation, using provider counters when available."""
         if "estimate_session_prompt_tokens" in self.__dict__:
-            return self.estimate_session_prompt_tokens(
-                session,
-                session_summary=session_summary,
-            )
+            try:
+                return self.estimate_session_prompt_tokens(
+                    session,
+                    session_summary=session_summary,
+                    current_message=current_message,
+                )
+            except TypeError:
+                return self.estimate_session_prompt_tokens(
+                    session,
+                    session_summary=session_summary,
+                )
         history = session.get_history(max_messages=0)
         channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
         probe_messages = self._build_messages(
             history=history,
-            current_message="[token-probe]",
+            current_message=current_message,
             channel=channel,
             chat_id=chat_id,
             session_summary=session_summary,
@@ -238,6 +247,7 @@ class Consolidator:
         session: Session,
         *,
         session_summary: str | None = None,
+        current_message: str | None = None,
     ) -> None:
         """Loop: archive old messages until prompt fits within safe budget.
 
@@ -256,6 +266,7 @@ class Consolidator:
                 estimated, source = await self.async_estimate_session_prompt_tokens(
                     session,
                     session_summary=session_summary,
+                    current_message=current_message or "[token-probe]",
                 )
             except Exception:
                 logger.exception("Token estimation failed for {}", session.key)
@@ -326,6 +337,7 @@ class Consolidator:
                     estimated, source = await self.async_estimate_session_prompt_tokens(
                         session,
                         session_summary=session_summary,
+                        current_message=current_message or "[token-probe]",
                     )
                 except Exception:
                     logger.exception("Token estimation failed for {}", session.key)

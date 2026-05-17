@@ -211,3 +211,38 @@ def test_consolidator_uses_budget_policy_target(tmp_path, monkeypatch):
     expected = BudgetPolicy.for_model(window=272_000, output_reserve=24_000)
     assert consolidator.policy.target == expected.target
     assert consolidator.policy.soft == expected.soft
+
+
+def test_probe_includes_current_message():
+    """A real user message should be projected into the token probe."""
+    from pythinker.agent.memory.consolidator import Consolidator
+    from pythinker.session.manager import Session
+
+    provider = MagicMock()
+    provider.generation = MagicMock(max_tokens=4096)
+    provider.estimate_prompt_tokens = None
+
+    big = "word " * 2000
+    calls: list[str] = []
+
+    def build_messages(**kwargs):
+        calls.append(kwargs.get("current_message") or "")
+        return [{"role": "user", "content": kwargs.get("current_message", "")}]
+
+    c = Consolidator(
+        store=MagicMock(),
+        provider=provider,
+        model="gpt-5.5",
+        sessions=MagicMock(),
+        context_window_tokens=65_536,
+        build_messages=build_messages,
+        get_tool_definitions=lambda: [],
+    )
+    session = Session(key="cli:t")
+    session.messages = [{"role": "user", "content": "old"}]
+
+    c.estimate_session_prompt_tokens(session)
+    c.estimate_session_prompt_tokens(session, current_message=big)
+
+    assert calls[0] == "[token-probe]"
+    assert calls[1] == big

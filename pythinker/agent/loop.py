@@ -1230,6 +1230,7 @@ class AgentLoop:
             await self.consolidator.maybe_consolidate_by_tokens(
                 session,
                 session_summary=pending,
+                current_message=msg.content,
             )
             # Persist subagent follow-ups into durable history BEFORE prompt
             # assembly. ContextBuilder merges adjacent same-role messages for
@@ -1305,6 +1306,7 @@ class AgentLoop:
         await self.consolidator.maybe_consolidate_by_tokens(
             session,
             session_summary=pending,
+            current_message=msg.content,
         )
 
         self._set_tool_context(

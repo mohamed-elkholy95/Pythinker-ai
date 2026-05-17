@@ -11,6 +11,8 @@ All notable user-visible changes to Pythinker land here. The project follows
 - WhatsApp media downloads now pass Baileys' media reupload callback, retry transient fetch
   failures, skip undecryptable payloads with sanitized metadata, and redact upstream Signal
   session objects from bridge console output.
+- WhatsApp bridge startup now reports a friendly port-in-use error instead of an unhandled
+  WebSocket server exception when another bridge is already bound to the same port.
 
 ## [2.5.1] - 2026-05-17
 

@@ -65,20 +65,7 @@ export class BridgeServer {
       throw new Error('BRIDGE_TOKEN is required');
     }
 
-    // Bind to localhost only — never expose to external network
-    this.wss = new WebSocketServer({
-      host: '127.0.0.1',
-      port: this.port,
-      verifyClient: (info, done) => {
-        const origin = info.origin || info.req.headers.origin;
-        if (origin) {
-          console.warn(`Rejected WebSocket connection with Origin header: ${origin}`);
-          done(false, 403, 'Browser-originated WebSocket connections are not allowed');
-          return;
-        }
-        done(true);
-      },
-    });
+    this.wss = await this.bindWebSocketServer();
     console.log(`🌉 Bridge server listening on ws://127.0.0.1:${this.port}`);
     console.log('🔒 Token authentication enabled');
 
@@ -116,6 +103,55 @@ export class BridgeServer {
 
     // Connect to WhatsApp
     await this.wa.connect();
+  }
+
+  private bindWebSocketServer(): Promise<WebSocketServer> {
+    // Bind to localhost only — never expose to external network.
+    const server = new WebSocketServer({
+      host: '127.0.0.1',
+      port: this.port,
+      verifyClient: (info, done) => {
+        const origin = info.origin || info.req.headers.origin;
+        if (origin) {
+          console.warn(`Rejected WebSocket connection with Origin header: ${origin}`);
+          done(false, 403, 'Browser-originated WebSocket connections are not allowed');
+          return;
+        }
+        done(true);
+      },
+    });
+
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        server.off('error', onError);
+        server.off('listening', onListening);
+      };
+      const onError = (error: Error) => {
+        cleanup();
+        server.close();
+        reject(this.describeListenError(error));
+      };
+      const onListening = () => {
+        cleanup();
+        server.on('error', (error) => {
+          console.error('Bridge WebSocket server error:', this.describeListenError(error));
+        });
+        resolve(server);
+      };
+      server.once('error', onError);
+      server.once('listening', onListening);
+    });
+  }
+
+  private describeListenError(error: Error): Error {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === 'EADDRINUSE') {
+      return new Error(
+        `WhatsApp bridge port ${this.port} is already in use on 127.0.0.1. `
+        + 'Stop the existing bridge process, or start this bridge with a different BRIDGE_PORT.',
+      );
+    }
+    return error;
   }
 
   private setupClient(ws: WebSocket): void {

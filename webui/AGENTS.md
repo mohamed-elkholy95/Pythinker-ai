@@ -14,7 +14,8 @@ bun run dev                  # http://127.0.0.1:5173, proxies to gateway
 bun run build                # tsc first, then writes ../pythinker/web/dist
 bun run test                 # vitest, single run
 bun run test:watch
-bun run lint                 # eslint, --max-warnings 0
+bun run lint                 # Biome lint
+bun run format               # Biome format src/
 
 bunx vitest run src/tests/pythinker-client.test.ts
 bunx vitest run -t "regenerate"

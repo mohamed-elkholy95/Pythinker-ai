@@ -37,7 +37,7 @@ class ModelMetadata:
     confidence: Literal["official", "provider_api", "curated", "fallback"] = "curated"
     is_alias: bool = False
 
-_PROVIDER_PREFIXES = {"anthropic", "azure_openai", "gemini", "github_copilot", "openai", "openai_codex"}
+PYTHINKER_PROVIDER_PREFIXES = frozenset({"openai", "openai_codex", "openai-codex", "azure_openai", "azure-openai", "anthropic", "github_copilot", "github-copilot", "gemini", "openrouter", "aihubmix", "litellm", "vercel_ai_gateway", "deepseek", "zhipu", "dashscope", "moonshot", "minimax", "minimax_anthropic", "mistral", "stepfun", "xiaomi_mimo", "vllm", "ollama", "lm_studio", "ovms", "groq", "qianfan", "xai", "cerebras", "together", "fireworks", "huggingface", "siliconflow", "volcengine", "byteplus", "custom"})
 def _metadata_from_row(row: dict[str, Any], *, alias: bool = False) -> ModelMetadata:
     data = dict(row)
     data["aliases"] = tuple(data.get("aliases") or ())
@@ -55,14 +55,19 @@ def resolve_model_alias(model: str) -> str:
     meta = get_model_metadata(model)
     return meta.model_id if meta and meta.is_alias else model
 def _candidate_keys(model: str) -> list[tuple[str | None, str]]:
-    parts = model.split("/", 1)
-    if len(parts) == 1:
-        return [(None, model)]
-    provider = parts[0].replace("-", "_").lower()
-    keys: list[tuple[str | None, str]] = []
-    if provider in _PROVIDER_PREFIXES:
-        keys.append((provider, parts[1]))
-    return keys + [(parts[0].lower(), parts[1]), (None, parts[1])]
+    parts = model.split("/")
+    candidates: list[tuple[str | None, str]] = []
+    for i, prefix in enumerate(parts):
+        rest = "/".join(parts[i + 1:])
+        if not rest:
+            candidates.append((None, prefix))
+            continue
+        normalized = prefix.replace("-", "_").lower()
+        if normalized in PYTHINKER_PROVIDER_PREFIXES:
+            candidates.append((normalized, rest))
+        candidates.append((prefix.lower(), rest))
+    candidates.append((None, parts[-1]))
+    return candidates
 def _override_metadata(model: str, override: Any) -> ModelMetadata:
     data = override.model_dump(exclude_none=True) if hasattr(override, "model_dump") else dict(override)
     data.setdefault("provider", model.split("/", 1)[0].replace("-", "_") if "/" in model else "custom")

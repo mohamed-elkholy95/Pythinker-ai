@@ -25,6 +25,8 @@ Standalone env vars:
 - `BRIDGE_TOKEN` required; shared secret for WS auth handshake. Pythinker provisions it when spawning the bridge.
 - `BRIDGE_PORT` default `3001`.
 - `AUTH_DIR` default `~/.pythinker/whatsapp-auth`; Baileys auth state lives here, sibling `media/` receives downloads.
+- `PYTHINKER_BRIDGE_SOURCE_DIR` dev-only; when set, Pythinker spawns the bridge from this path instead of `~/.pythinker/bridge/`, so repo edits take effect on restart without a re-deploy. Requires a built `dist/index.js`.
+- `BRIDGE_KEEPALIVE_MS`, `BRIDGE_CONNECT_TIMEOUT_MS`, `BRIDGE_QUERY_TIMEOUT_MS` optional; positive integers forwarded to `makeWASocket` as `keepAliveIntervalMs`, `connectTimeoutMs`, `defaultQueryTimeoutMs`. Use to harden the Baileys socket on flaky networks.
 
 ## Architecture
 
@@ -42,6 +44,8 @@ Client -> server after auth:
 
 - `{type:"send", to, text}`
 - `{type:"send_media", to, filePath, mimetype, caption?, fileName?}`
+- `{type:"presence", to?, state}` where `state` is `"available"`, `"unavailable"`, `"composing"`, `"recording"`, or `"paused"`
+- `{type:"read", keys: [{remoteJid, id, fromMe?}]}` marks the listed messages as read (blue ticks)
 
 Server -> client:
 

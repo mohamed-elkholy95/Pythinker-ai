@@ -1247,7 +1247,7 @@ def _get_bridge_dir() -> Path:
     # Check for npm
     npm_path = shutil.which("npm")
     if not npm_path:
-        console.print("[red]npm not found. Please install Node.js >= 18.[/red]")
+        console.print("[red]npm not found. Please install Node.js >= 20.[/red]")
         raise typer.Exit(1)
 
     # Find source bridge: first check package data, then source dir
@@ -1289,6 +1289,36 @@ def _get_bridge_dir() -> Path:
         raise typer.Exit(1)
 
     return user_bridge
+
+
+@channels_app.command("pair")
+def channels_pair(
+    channel_name: str = typer.Argument("whatsapp", help="Channel name (currently only `whatsapp` supports pairing)"),
+    ttl: int = typer.Option(600, "--ttl", help="How long the code stays valid, in seconds (min 60)."),
+    label: str | None = typer.Option(None, "--label", help="Optional human label stored alongside the code."),
+):
+    """Generate a one-time pairing code for a channel.
+
+    Share the printed code with the person you want to grant access to. They
+    redeem it by sending `/pair <code>` from the channel; after redemption
+    they're added to the channel's approved-senders list automatically.
+    """
+    if channel_name != "whatsapp":
+        console.print(f"[red]Pairing is not supported for channel: {channel_name}[/red]")
+        raise typer.Exit(1)
+
+    from pythinker.channels.whatsapp import WhatsAppChannel
+
+    try:
+        info = WhatsAppChannel.issue_pairing_code(ttl_seconds=ttl, label=label)
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    minutes = max(1, info["ttl_seconds"] // 60)
+    console.print(f"\n🔢 Pairing code: [bold]{info['code']}[/bold]")
+    console.print(f"Valid for {minutes} minute(s).")
+    console.print(f"Have the user send `/pair {info['code']}` from WhatsApp.\n")
 
 
 @channels_app.command("login")

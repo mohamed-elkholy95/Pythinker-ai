@@ -6,6 +6,24 @@ All notable user-visible changes to Pythinker land here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- WhatsApp replies now keep a Baileys typing indicator active while the agent turn is in progress.
+- WhatsApp: blue-tick read receipts on inbound messages (`channels.whatsapp.send_read_receipts`).
+- WhatsApp: configurable typing mode and refresh interval (`typing_mode`, `typing_interval_seconds`).
+- WhatsApp: `typing_min_visible_ms` (default 800ms) holds the typing indicator long enough to render even when the LLM reply is faster than the WhatsApp client animation threshold.
+- WhatsApp: outbound text chunking on a configurable limit (`text_chunk_limit`, `chunk_mode`).
+- WhatsApp: per-media size cap (`media_max_mb`).
+- WhatsApp: capped exponential backoff with jitter on bridge reconnect (`reconnect_initial_ms`, `reconnect_max_ms`, `reconnect_factor`, `reconnect_jitter`).
+- WhatsApp: bridge socket tuning via env (`BRIDGE_KEEPALIVE_MS`, `BRIDGE_CONNECT_TIMEOUT_MS`, `BRIDGE_QUERY_TIMEOUT_MS`).
+- WhatsApp: `dm_policy` (`open`/`allowlist`/`disabled`) and `group_policy: allowlist` with `group_allow_from`.
+- WhatsApp: chat-level presence now targets the phone JID instead of the LID when available.
+- WhatsApp: voice/Opus audio outbound is sent with `ptt: true` so it renders as a proper voice note.
+
+### Changed
+
+- WhatsApp: `group_policy` accepts `"allowlist"` in addition to `"open"`/`"mention"`.
+
 ## [2.5.0] - 2026-05-17
 
 ### Added

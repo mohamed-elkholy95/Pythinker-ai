@@ -21,7 +21,26 @@ interface SendMediaCommand {
   fileName?: string;
 }
 
-type BridgeCommand = SendCommand | SendMediaCommand;
+const PRESENCE_STATES = new Set(['available', 'unavailable', 'composing', 'recording', 'paused']);
+
+interface PresenceCommand {
+  type: 'presence';
+  to?: string;
+  state: 'available' | 'unavailable' | 'composing' | 'recording' | 'paused';
+}
+
+interface ReadCommand {
+  type: 'read';
+  keys: Array<{ remoteJid: string; id: string; fromMe?: boolean }>;
+}
+
+type BridgeCommand = SendCommand | SendMediaCommand | PresenceCommand | ReadCommand;
+
+export interface SocketTuning {
+  keepAliveIntervalMs?: number;
+  connectTimeoutMs?: number;
+  defaultQueryTimeoutMs?: number;
+}
 
 interface BridgeMessage {
   type: 'message' | 'status' | 'qr' | 'error';
@@ -38,6 +57,7 @@ export class BridgeServer {
     private authDir: string,
     private token: string,
     private pairingPhone?: string,
+    private tuning: SocketTuning = {},
   ) {}
 
   async start(): Promise<void> {
@@ -66,6 +86,9 @@ export class BridgeServer {
     this.wa = new WhatsAppClient({
       authDir: this.authDir,
       pairingPhone: this.pairingPhone,
+      keepAliveIntervalMs: this.tuning.keepAliveIntervalMs,
+      connectTimeoutMs: this.tuning.connectTimeoutMs,
+      defaultQueryTimeoutMs: this.tuning.defaultQueryTimeoutMs,
       onMessage: (msg) => this.broadcast({ type: 'message', ...msg }),
       onQR: (qr) => this.broadcast({ type: 'qr', qr }),
       onStatus: (status) => this.broadcast({ type: 'status', status }),
@@ -102,7 +125,8 @@ export class BridgeServer {
       try {
         const cmd = JSON.parse(data.toString()) as BridgeCommand;
         await this.handleCommand(cmd);
-        ws.send(JSON.stringify({ type: 'sent', to: cmd.to }));
+        const ackTo = 'to' in cmd ? cmd.to : undefined;
+        ws.send(JSON.stringify({ type: 'sent', to: ackTo }));
       } catch (error) {
         console.error('Error handling command:', error);
         ws.send(JSON.stringify({ type: 'error', error: String(error) }));
@@ -127,6 +151,16 @@ export class BridgeServer {
       await this.wa.sendMessage(cmd.to, cmd.text);
     } else if (cmd.type === 'send_media') {
       await this.wa.sendMedia(cmd.to, cmd.filePath, cmd.mimetype, cmd.caption, cmd.fileName);
+    } else if (cmd.type === 'presence') {
+      if (!PRESENCE_STATES.has(cmd.state)) {
+        throw new Error(`Invalid presence state: ${String(cmd.state)}`);
+      }
+      await this.wa.setPresence(cmd.to, cmd.state);
+    } else if (cmd.type === 'read') {
+      if (!Array.isArray(cmd.keys)) {
+        throw new Error('read command requires keys[]');
+      }
+      await this.wa.sendReadReceipt(cmd.keys);
     }
   }
 

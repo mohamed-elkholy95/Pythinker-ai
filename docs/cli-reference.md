@@ -164,19 +164,21 @@ land?" sanity checks at the host shell.
 
 ## `pythinker channels`
 
-Per-channel inspection and login. The sub-app has three commands.
+Per-channel inspection, login, and pairing helpers.
 
 ```
 pythinker channels status [--config PATH]
 pythinker channels list   [--config PATH]
 pythinker channels login  <channel-name> [--force] [--config PATH]
+pythinker channels pair   [channel-name] [--ttl SECONDS] [--label TEXT]
 ```
 
 | Subcommand | Purpose |
 |---|---|
 | `status` | Tabular `name + enabled` view from the registry; respects only the channels currently registered (built-in + plugins). |
 | `list` | Tabular `name + enabled + configured` view. `enabled` = the channel's section is enabled in config; `configured` = the section has the minimum credentials/IDs to run. |
-| `login` | Authenticate a channel that has an interactive login (e.g. WhatsApp QR pairing). `--force` re-runs the login even if tokens already exist. |
+| `login` | Authenticate a channel that has an interactive login (e.g. WhatsApp QR/device pairing). `--force` re-runs the login even if tokens already exist. |
+| `pair` | Generate a one-time WhatsApp sender-pairing code for `channels.whatsapp.dmPolicy = "pairing"`. |
 
 `status` is the registry view (what code knows how to load); `list`
 adds the config view (what's actually wired up). Use both when

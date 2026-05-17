@@ -31,6 +31,18 @@ const AUTH_DIR = process.env.AUTH_DIR || join(homedir(), '.pythinker', 'whatsapp
 const TOKEN = process.env.BRIDGE_TOKEN?.trim();
 const PAIRING_PHONE = process.env.WHATSAPP_PAIRING_PHONE?.replace(/\D/g, '') || undefined;
 
+const parsePositiveInt = (raw: string | undefined): number | undefined => {
+  if (!raw) return undefined;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+};
+
+const TUNING = {
+  keepAliveIntervalMs: parsePositiveInt(process.env.BRIDGE_KEEPALIVE_MS),
+  connectTimeoutMs: parsePositiveInt(process.env.BRIDGE_CONNECT_TIMEOUT_MS),
+  defaultQueryTimeoutMs: parsePositiveInt(process.env.BRIDGE_QUERY_TIMEOUT_MS),
+};
+
 if (!TOKEN) {
   console.error('BRIDGE_TOKEN is required. Start the bridge via pythinker so it can provision a local secret automatically.');
   process.exit(1);
@@ -39,7 +51,7 @@ if (!TOKEN) {
 console.log('🤖 pythinker WhatsApp Bridge');
 console.log('========================\n');
 
-const server = new BridgeServer(PORT, AUTH_DIR, TOKEN, PAIRING_PHONE);
+const server = new BridgeServer(PORT, AUTH_DIR, TOKEN, PAIRING_PHONE, TUNING);
 
 // Handle graceful shutdown
 process.on('SIGINT', async () => {

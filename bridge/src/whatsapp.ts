@@ -21,6 +21,8 @@ import { randomBytes } from 'crypto';
 
 const VERSION = '0.1.0';
 
+type PresenceState = 'available' | 'unavailable' | 'composing' | 'recording' | 'paused';
+
 export interface InboundMessage {
   id: string;
   sender: string;
@@ -35,6 +37,9 @@ export interface InboundMessage {
 export interface WhatsAppClientOptions {
   authDir: string;
   pairingPhone?: string;
+  keepAliveIntervalMs?: number;
+  connectTimeoutMs?: number;
+  defaultQueryTimeoutMs?: number;
   onMessage: (msg: InboundMessage) => void;
   onQR: (qr: string) => void;
   onStatus: (status: string) => void;
@@ -104,7 +109,7 @@ export class WhatsAppClient {
     }
 
     // Create socket
-    this.sock = makeWASocket({
+    const socketOpts: any = {
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
@@ -115,7 +120,11 @@ export class WhatsAppClient {
       browser: ['pythinker', 'cli', VERSION],
       syncFullHistory: false,
       markOnlineOnConnect: false,
-    });
+    };
+    if (this.options.keepAliveIntervalMs) socketOpts.keepAliveIntervalMs = this.options.keepAliveIntervalMs;
+    if (this.options.connectTimeoutMs) socketOpts.connectTimeoutMs = this.options.connectTimeoutMs;
+    if (this.options.defaultQueryTimeoutMs) socketOpts.defaultQueryTimeoutMs = this.options.defaultQueryTimeoutMs;
+    this.sock = makeWASocket(socketOpts);
 
     // Handle WebSocket errors
     if (this.sock.ws && typeof this.sock.ws.on === 'function') {
@@ -298,6 +307,30 @@ export class WhatsAppClient {
     await this.sock.sendMessage(to, { text });
   }
 
+  async setPresence(to: string | undefined, state: PresenceState): Promise<void> {
+    if (!this.sock) {
+      throw new Error('Not connected');
+    }
+
+    const jid = state === 'available' || state === 'unavailable' ? undefined : to;
+    if (!jid && state !== 'available' && state !== 'unavailable') {
+      throw new Error('Presence target required');
+    }
+
+    await this.sock.sendPresenceUpdate(state, jid);
+  }
+
+  async sendReadReceipt(keys: Array<{ remoteJid: string; id: string; fromMe?: boolean }>): Promise<void> {
+    if (!this.sock || keys.length === 0) {
+      return;
+    }
+    try {
+      await this.sock.readMessages(keys.map((k) => ({ ...k, fromMe: k.fromMe ?? false })));
+    } catch (err) {
+      console.debug('readMessages failed:', err);
+    }
+  }
+
   async sendMedia(
     to: string,
     filePath: string,
@@ -317,7 +350,10 @@ export class WhatsAppClient {
     } else if (category === 'video') {
       await this.sock.sendMessage(to, { video: buffer, caption: caption || undefined, mimetype });
     } else if (category === 'audio') {
-      await this.sock.sendMessage(to, { audio: buffer, mimetype });
+      // Treat opus/ogg as a proper voice note (ptt) so WhatsApp renders the
+      // waveform + 1.5x/2x playback controls.
+      const ptt = /^audio\/(ogg|opus)/i.test(mimetype);
+      await this.sock.sendMessage(to, { audio: buffer, mimetype, ptt });
     } else {
       const name = fileName || basename(filePath);
       await this.sock.sendMessage(to, { document: buffer, mimetype, fileName: name });

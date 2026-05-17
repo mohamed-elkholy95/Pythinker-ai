@@ -177,7 +177,7 @@ pythinker gateway
 <details>
 <summary><b>WhatsApp</b></summary>
 
-Requires **Node.js ≥18**.
+Requires **Node.js ≥20**.
 
 **1. Link device**
 
@@ -201,7 +201,11 @@ WHATSAPP_PAIRING_PHONE=15551234567 pythinker channels login whatsapp
   "channels": {
     "whatsapp": {
       "enabled": true,
-      "allowFrom": ["+1234567890"]
+      "allowFrom": ["+1234567890"],
+      "dmPolicy": "open",
+      "groupPolicy": "mention",
+      "sendReadReceipts": true,
+      "typingMode": "thinking"
     }
   }
 }
@@ -218,6 +222,18 @@ pythinker gateway
 ```
 
 Voice/audio messages are downloaded by the bridge and passed to the Python channel for transcription when `transcriptionProvider` and the matching API key are configured.
+
+Useful WhatsApp options:
+
+| Option | Purpose |
+|---|---|
+| `dmPolicy` | `open`, `allowlist`, `disabled`, or `pairing`. `pairing` requires a one-time code from `pythinker channels pair whatsapp`. |
+| `groupPolicy` | `open`, `mention`, or `allowlist`; `groupAllowFrom` lists allowed group JIDs for `allowlist`. |
+| `sendReadReceipts` | Send blue-tick read receipts for accepted inbound messages. |
+| `typingMode` | `thinking` shows WhatsApp typing presence during agent turns; `never` disables it. |
+| `typingIntervalSeconds` / `typingMinVisibleMs` | Tune typing refresh cadence and minimum visible duration. |
+| `textChunkLimit` / `chunkMode` | Split long outbound replies before sending to WhatsApp. |
+| `mediaMaxMb` | Skip outbound media above this size. |
 
 > WhatsApp bridge updates are not applied automatically for existing installations.
 > After upgrading pythinker, rebuild the local bridge with:

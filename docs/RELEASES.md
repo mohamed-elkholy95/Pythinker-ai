@@ -34,10 +34,10 @@ no entries the preceding Saturday.
 
 | Version | RC date (Fri, optional) | Release date (Mon) | Status |
 |---------|------------------------|--------------------|--------|
-| 2.1.0   | 2026-05-15 *(if needed)* | 2026-05-18 | Planned |
-| 2.2.0   | 2026-05-29 *(if needed)* | 2026-06-01 | Planned |
-| 2.3.0   | 2026-06-12 *(if needed)* | 2026-06-15 | Planned |
-| 2.4.0   | 2026-06-26 *(if needed)* | 2026-06-29 | Planned |
+| 2.6.0   | 2026-05-29 *(if needed)* | 2026-06-01 | Planned |
+| 2.7.0   | 2026-06-12 *(if needed)* | 2026-06-15 | Planned |
+| 2.8.0   | 2026-06-26 *(if needed)* | 2026-06-29 | Planned |
+| 2.9.0   | 2026-07-10 *(if needed)* | 2026-07-13 | Planned |
 
 Freeze window for each: from the **Saturday before** the release
 Monday. Only bug fixes and doc updates merge to `main` during freeze.
@@ -51,6 +51,12 @@ None planned. A major release requires a 30-day announcement window
 
 | Version | Date       | Type   | Notes |
 |---------|------------|--------|-------|
+| 2.5.0   | 2026-05-17 | minor  | Provider-aware model metadata, context-window budgeting, usage-cost estimates, and context assembly hardening. |
+| 2.4.0   | 2026-05-15 | minor  | Onboarding timeline refresh, mascot rebrand, and persisted slash-command history. |
+| 2.3.0   | 2026-05-14 | minor  | WhatsApp voice media, safer ingress checks, and Nanobot upstream audit fixes. |
+| 2.2.0   | 2026-05-06 | minor  | Multi-agent workspace layout, `/init`, subagent tasks, and WebUI admin controls. |
+| 2.1.1   | 2026-05-03 | patch  | WebUI empty stream-end cleanup, generated title cleanup, lint hygiene, and PyPI metadata fixes. |
+| 2.1.0   | 2026-05-02 | minor  | Config Workbench admin UI, smoother WebUI streaming, Streamdown rendering, and chat UX upgrades. |
 | 2.0.2   | 2026-05-01 | patch  | Onboarding wizard regressions ([PR #7](https://github.com/mohamed-elkholy95/Pythinker-ai/pull/7)) |
 | 2.0.1   | 2026-05-01 | patch  | Admin dashboard, usage ledger, config editing API |
 

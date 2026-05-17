@@ -6,6 +6,8 @@ All notable user-visible changes to Pythinker land here. The project follows
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-05-17
+
 ### Added
 
 - Provider-aware model metadata registry with checked-in curated model limits, source/confidence tracking, user overrides, and Azure deployment-to-base-model mapping. Runtime startup remains offline by default.

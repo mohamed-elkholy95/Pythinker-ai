@@ -17,7 +17,7 @@
 
 > Powered by a tiny, multiplexing agent loop: one Python process listens to Slack, Telegram, Discord, WhatsApp, Matrix, MS Teams, email, a WebSocket WebUI, and an OpenAI-compatible HTTP API — all backed by a single session-scoped memory layer.
 
-> **What's new in 2.4.0** — refreshed onboarding wizard with a coherent timeline rail (● completed · ◉ active · ◐ in-progress) and a muted violet accent, slash-command history now persists across TUI restarts, and the project mascot is now 🤖. See the [changelog](CHANGELOG.md) for details.
+> **What's new in 2.5.0** — provider-aware model metadata now drives context-window profiles, Anthropic token counting is available with caching and 429-aware retry, the WebUI shows floor / history / headroom usage bars with cost estimates, and context assembly is more defensive under compacting pressure. See the [changelog](CHANGELOG.md) for details.
 
 ## 💡 Key Features
 

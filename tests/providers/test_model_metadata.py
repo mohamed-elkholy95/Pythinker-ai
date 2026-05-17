@@ -19,6 +19,15 @@ def test_openai_codex_prefix_resolves_to_curated_gpt_profile():
     assert meta.currency == "USD"
 
 
+def test_minimax_bare_model_resolves_pricing_for_existing_ledgers():
+    meta = get_model_metadata("MiniMax-M2.7")
+    assert meta is not None
+    assert meta.provider == "minimax"
+    assert meta.input_cost_per_million == 0.3
+    assert meta.cached_input_cost_per_million == 0.06
+    assert meta.output_cost_per_million == 1.2
+
+
 def test_chat_preview_keeps_smaller_usable_input_budget():
     meta = get_model_metadata("openai/gpt-5.2-chat")
     assert meta is not None

@@ -16,6 +16,7 @@
     {"provider":"anthropic","model_id":"claude-sonnet-4-6","encoding":"cl100k_base","source":"provider_api","confidence":"provider_api","preferred_api":"anthropic_messages","count_tokens_supported":true,"runtime_metadata_supported":true},
     {"provider":"github_copilot","model_id":"gpt-5.5","input_tokens":128000,"max_output_tokens":16384,"total_context_tokens":128000,"encoding":"o200k_base","source":"fallback","confidence":"fallback","runtime_metadata_supported":true},
     {"provider":"gemini","model_id":"gemini-3-flash","aliases":["gemini-flash-latest","-latest"],"input_tokens":1048576,"max_output_tokens":65536,"total_context_tokens":1048576,"encoding":"cl100k_base","source":"provider_api","confidence":"provider_api","supports_tools":true,"supports_vision":true},
+    {"provider":"minimax","model_id":"MiniMax-M2.7","input_tokens":204800,"total_context_tokens":204800,"encoding":"cl100k_base","source":"official_docs","confidence":"official","preferred_api":"chat_completions","supports_tools":true,"input_cost_per_million":0.3,"cached_input_cost_per_million":0.06,"output_cost_per_million":1.2,"currency":"USD","pricing_source_url":"https://platform.minimax.io/docs/guides/pricing-paygo#text"},
     {"provider":"gemini","model_id":"gemini-3.1-pro","aliases":["gemini-pro-latest"],"input_tokens":1048576,"max_output_tokens":65536,"total_context_tokens":1048576,"encoding":"cl100k_base","source":"provider_api","confidence":"provider_api","supports_tools":true,"supports_vision":true}
   ]
 }

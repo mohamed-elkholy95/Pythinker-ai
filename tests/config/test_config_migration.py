@@ -38,11 +38,11 @@ def test_load_config_keeps_max_tokens_and_ignores_legacy_memory_window(tmp_path)
     config = load_config(config_path)
 
     assert config.agents.defaults.max_tokens == 1234
-    assert config.agents.defaults.context_window_tokens == 65_536
+    assert config.agents.defaults.context_window_tokens is None
     assert not hasattr(config.agents.defaults, "memory_window")
 
 
-def test_save_config_writes_context_window_tokens_but_not_memory_window(tmp_path) -> None:
+def test_save_config_preserves_context_window_tokens_but_not_memory_window(tmp_path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(
         json.dumps(
@@ -50,6 +50,7 @@ def test_save_config_writes_context_window_tokens_but_not_memory_window(tmp_path
                 "agents": {
                     "defaults": {
                         "maxTokens": 2222,
+                        "contextWindowTokens": 65_536,
                         "memoryWindow": 30,
                     }
                 }

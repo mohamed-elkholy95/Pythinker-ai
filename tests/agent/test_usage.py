@@ -13,6 +13,13 @@ def test_empty_session_reports_zero_used():
     assert result["limit"] == 128_000
 
 
+def test_unset_context_window_uses_model_profile_limit():
+    s = Session(key="websocket:abc")
+    defaults = AgentDefaults(model="openai-codex/gpt-5.5")
+    result = estimate_session_usage(s, defaults)
+    assert result["limit"] == 272_000
+
+
 def test_messages_increase_used_count():
     s = Session(key="websocket:abc")
     s.add_message("user", "hello there, how are you doing today")

@@ -22,7 +22,7 @@ class ProviderSnapshot:
 
     provider: LLMProvider
     model: str
-    context_window_tokens: int
+    context_window_tokens: int | None
     signature: tuple[object, ...]
 
 

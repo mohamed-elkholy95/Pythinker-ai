@@ -32,7 +32,7 @@ def derive_window(provider: LLMProvider, model: str, configured: int | None) -> 
     return configured
 
 
-def clamp_context_window(provider: LLMProvider, model: str, configured: int) -> int:
+def clamp_context_window(provider: LLMProvider, model: str, configured: int | None) -> int:
     """Backwards-compatible one-way clamp wrapper."""
     return derive_window(provider, model, configured)
 

@@ -158,13 +158,16 @@ def _check_model_context_window() -> CheckResult:
     configured = config.agents.defaults.context_window_tokens
     metadata = get_model_metadata(model, config=config)
     context_window = configured or (metadata.input_tokens if metadata else None) or 65_536
-    source = metadata.source.value if metadata else "fallback"
+    metadata_source = metadata.source.value if metadata else "fallback"
     encoding = metadata.encoding if metadata else "cl100k_base"
-    return CheckResult(
-        "ok",
-        "Model context",
-        f"context_window={context_window} source={source} encoding={encoding}",
-    )
+    if configured:
+        detail = (
+            f"context_window={context_window} source=config_override "
+            f"metadata_source={metadata_source} encoding={encoding}"
+        )
+    else:
+        detail = f"context_window={context_window} source={metadata_source} encoding={encoding}"
+    return CheckResult("ok", "Model context", detail)
 
 
 def _check_default_provider_auth() -> list[CheckResult]:

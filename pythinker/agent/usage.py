@@ -12,6 +12,7 @@ from typing import Literal, TypedDict
 from loguru import logger
 
 from pythinker.config.schema import AgentDefaults
+from pythinker.providers.model_profiles import get_profile
 from pythinker.session.manager import Session
 from pythinker.utils.helpers import estimate_prompt_tokens
 
@@ -21,6 +22,17 @@ class SessionUsage(TypedDict, total=False):
     limit: int
     floor: int
     floor_status: Literal["ok", "unavailable", "skipped"]
+
+
+def _usage_limit(defaults: AgentDefaults) -> int:
+    profile = get_profile(defaults.model)
+    cap = profile.input if profile else None
+    configured = defaults.context_window_tokens
+    if configured is None:
+        return cap or 65_536
+    if cap is not None and configured > cap:
+        return cap
+    return configured
 
 
 def estimate_session_usage(
@@ -39,10 +51,11 @@ def estimate_session_usage(
     so operators can spot a broken tiktoken install (the UI would otherwise
     show a misleading 0%).
     """
+    limit = _usage_limit(defaults)
     if not session.messages:
         return {
             "used": 0,
-            "limit": defaults.context_window_tokens,
+            "limit": limit,
             "floor": floor_tokens,
             "floor_status": floor_status,
         }
@@ -53,8 +66,8 @@ def estimate_session_usage(
             "tiktoken may be unavailable"
         )
     return {
-        "used": min(used, defaults.context_window_tokens),
-        "limit": defaults.context_window_tokens,
+        "used": min(used, limit),
+        "limit": limit,
         "floor": floor_tokens,
         "floor_status": floor_status,
     }

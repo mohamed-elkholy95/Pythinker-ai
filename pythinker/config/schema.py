@@ -77,7 +77,7 @@ class AgentDefaults(Base):
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )
     max_tokens: int = 8192
-    context_window_tokens: int = 65_536
+    context_window_tokens: int | None = None
     context_block_limit: int | None = None
     temperature: float = 0.1
     max_tool_iterations: int = 200

@@ -110,6 +110,43 @@ def test_check_workspace_ok_when_writable(_tmp_pythinker_home):
     assert r.status == "ok"
 
 
+def test_check_model_context_window_reports_metadata_derived_default(_tmp_pythinker_home):
+    config_path, _ = _tmp_pythinker_home
+    _write_default_config(config_path)
+
+    r = doctor_module._check_model_context_window()
+
+    assert r.status == "ok"
+    assert "context_window=272000" in r.detail
+    assert "source=curated" in r.detail
+    assert "encoding=o200k_base" in r.detail
+
+
+def test_check_model_context_window_reports_config_override(_tmp_pythinker_home):
+    config_path, _ = _tmp_pythinker_home
+    config_path.write_text(
+        json.dumps(
+            {
+                "agents": {
+                    "defaults": {
+                        "model": "openai-codex/gpt-5.5",
+                        "provider": "auto",
+                        "contextWindowTokens": 65536,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    r = doctor_module._check_model_context_window()
+
+    assert r.status == "ok"
+    assert "context_window=65536" in r.detail
+    assert "source=config_override" in r.detail
+    assert "metadata_source=curated" in r.detail
+
+
 def test_check_browser_disabled_when_not_enabled(_tmp_pythinker_home):
     config_path, _ = _tmp_pythinker_home
     _write_default_config(config_path)

@@ -692,6 +692,26 @@ class WebSocketChannel(BaseChannel):
 
         profile = get_profile(self._agent_defaults.model)
         encoding = profile.encoding if profile else "cl100k_base"
+        floor_tokens = 0
+        floor_status = "skipped"
+        loop = self._admin_service.agent_loop if self._admin_service is not None else None
+        if loop is not None:
+            try:
+                from pythinker.utils.tokens import estimate_prompt_tokens
+
+                channel = decoded_key.split(":", 1)[0]
+                system_prompt = loop.context.build_system_prompt(channel=channel)
+                tools = loop.tools.get_definitions()
+                floor_tokens = estimate_prompt_tokens(
+                    [{"role": "system", "content": system_prompt}],
+                    tools=tools,
+                    encoding=getattr(loop, "_encoding", encoding),
+                )
+                floor_status = "ok"
+            except Exception as e:
+                logger.warning("floor estimator failed: {}", e)
+                floor_tokens = 0
+                floor_status = "unavailable"
 
         # ``estimate_session_usage`` only touches ``.messages`` on the input;
         # build a tiny shim around the raw dict so we don't have to reconstruct
@@ -703,6 +723,8 @@ class WebSocketChannel(BaseChannel):
             _SessionView(),  # type: ignore[arg-type]
             self._agent_defaults,
             encoding=encoding,
+            floor_tokens=floor_tokens,
+            floor_status=floor_status,
         )
         return _http_json_response(usage)
 

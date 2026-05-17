@@ -7,7 +7,7 @@ on the next turn).
 """
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 from loguru import logger
 
@@ -16,9 +16,11 @@ from pythinker.session.manager import Session
 from pythinker.utils.helpers import estimate_prompt_tokens
 
 
-class SessionUsage(TypedDict):
+class SessionUsage(TypedDict, total=False):
     used: int
     limit: int
+    floor: int
+    floor_status: Literal["ok", "unavailable", "skipped"]
 
 
 def estimate_session_usage(
@@ -26,6 +28,8 @@ def estimate_session_usage(
     defaults: AgentDefaults,
     *,
     encoding: str = "cl100k_base",
+    floor_tokens: int = 0,
+    floor_status: Literal["ok", "unavailable", "skipped"] = "skipped",
 ) -> SessionUsage:
     """Return the WebUI-friendly token usage snapshot for *session*.
 
@@ -36,7 +40,12 @@ def estimate_session_usage(
     show a misleading 0%).
     """
     if not session.messages:
-        return {"used": 0, "limit": defaults.context_window_tokens}
+        return {
+            "used": 0,
+            "limit": defaults.context_window_tokens,
+            "floor": floor_tokens,
+            "floor_status": floor_status,
+        }
     used = estimate_prompt_tokens(session.messages, None, encoding=encoding)
     if used == 0:
         logger.warning(
@@ -46,4 +55,6 @@ def estimate_session_usage(
     return {
         "used": min(used, defaults.context_window_tokens),
         "limit": defaults.context_window_tokens,
+        "floor": floor_tokens,
+        "floor_status": floor_status,
     }

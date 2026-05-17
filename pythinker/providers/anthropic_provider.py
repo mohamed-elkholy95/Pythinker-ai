@@ -12,6 +12,7 @@ from typing import Any
 
 import json_repair
 
+from pythinker.providers.anthropic_count_tokens import AnthropicCountTokensClient
 from pythinker.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 _ALNUM = string.ascii_letters + string.digits
@@ -51,6 +52,7 @@ class AnthropicProvider(LLMProvider):
         # Keep retries centralized in LLMProvider._run_with_retry to avoid retry amplification.
         client_kw["max_retries"] = 0
         self._client = AsyncAnthropic(**client_kw)
+        self._count_tokens_client: AnthropicCountTokensClient | None = None
 
     @classmethod
     def _handle_error(cls, e: Exception) -> LLMResponse:
@@ -470,6 +472,71 @@ class AnthropicProvider(LLMProvider):
             kwargs["extra_headers"] = self.extra_headers
 
         return kwargs
+
+    # ------------------------------------------------------------------
+    # Count tokens
+    # ------------------------------------------------------------------
+
+    def _ensure_count_tokens_client(self) -> AnthropicCountTokensClient:
+        if self._count_tokens_client is None:
+            self._count_tokens_client = AnthropicCountTokensClient(
+                transport=self._post_count_tokens,
+                cache_ttl_s=60.0,
+            )
+        return self._count_tokens_client
+
+    async def _post_count_tokens(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            kwargs = dict(body)
+            if self.extra_headers:
+                kwargs["extra_headers"] = self.extra_headers
+            response = await self._client.messages.count_tokens(**kwargs)
+        except Exception as e:
+            response_obj = getattr(e, "response", None)
+            headers = getattr(response_obj, "headers", None)
+            retry_after = self._extract_retry_after_from_headers(headers)
+            status_code = getattr(e, "status_code", None)
+            if status_code is None and response_obj is not None:
+                status_code = getattr(response_obj, "status_code", None)
+            markers = [str(status_code)] if status_code is not None else []
+            if retry_after is not None:
+                markers.append(f"retry-after={retry_after}")
+            markers.append(str(e))
+            raise RuntimeError(" ".join(markers)) from e
+
+        context_management = getattr(response, "context_management", None)
+        context_payload = None
+        if context_management is not None:
+            context_payload = {
+                "original_input_tokens": getattr(
+                    context_management,
+                    "original_input_tokens",
+                    None,
+                ),
+            }
+        return {
+            "input_tokens": getattr(response, "input_tokens", 0),
+            "context_management": context_payload,
+        }
+
+    async def async_estimate_prompt_tokens(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        model: str | None,
+    ) -> tuple[int, str]:
+        target = self._strip_prefix(model or self.default_model)
+        system, anthropic_msgs = self._convert_messages(self._sanitize_empty_content(messages))
+        anthropic_tools = self._convert_tools(tools)
+        result = await self._ensure_count_tokens_client().count(
+            messages=anthropic_msgs,
+            system=system or None,
+            tools=anthropic_tools,
+            model=target,
+        )
+        if result is None:
+            return 0, "none"
+        return result.input_tokens, result.source
 
     # ------------------------------------------------------------------
     # Response parsing

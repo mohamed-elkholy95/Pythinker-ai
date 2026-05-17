@@ -67,6 +67,14 @@ _KIMI_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.6",
     "k2.6-code-preview",
 })
+# Thinking-capable MiMo models per Xiaomi docs. mimo-v2-flash is omitted
+# because it does not support thinking.
+_MIMO_THINKING_MODELS: frozenset[str] = frozenset({
+    "mimo-v2.5-pro",
+    "mimo-v2.5",
+    "mimo-v2-pro",
+    "mimo-v2-omni",
+})
 
 
 def _is_kimi_thinking_model(model_name: str) -> bool:
@@ -84,6 +92,20 @@ def _is_kimi_thinking_model(model_name: str) -> bool:
     if name in _KIMI_THINKING_MODELS:
         return True
     if "/" in name and name.rsplit("/", 1)[1] in _KIMI_THINKING_MODELS:
+        return True
+    return False
+
+
+def _is_mimo_thinking_model(model_name: str) -> bool:
+    """Return True if model_name refers to a MiMo thinking-capable model.
+
+    Gateway providers can expose Xiaomi models without the xiaomi_mimo provider
+    spec, so match both bare slugs and publisher-prefixed names.
+    """
+    name = model_name.lower()
+    if name in _MIMO_THINKING_MODELS:
+        return True
+    if "/" in name and name.rsplit("/", 1)[1] in _MIMO_THINKING_MODELS:
         return True
     return False
 
@@ -377,7 +399,7 @@ class OpenAICompatProvider(LLMProvider):
                 extra = {"reasoning_split": thinking_enabled}
             elif spec.name in (
                 "volcengine", "volcengine_coding_plan",
-                "byteplus", "byteplus_coding_plan", "xiaomi_mimo",
+                "byteplus", "byteplus_coding_plan",
             ):
                 extra = {
                     "thinking": {"type": "enabled" if thinking_enabled else "disabled"}
@@ -390,6 +412,16 @@ class OpenAICompatProvider(LLMProvider):
         # so that OpenRouter-style names like "moonshotai/kimi-k2.5" are handled
         # identically to bare names like "kimi-k2.5".
         if reasoning_effort is not None and _is_kimi_thinking_model(model_name):
+            thinking_enabled = semantic_effort not in {"minimal", "none"}
+            kwargs.setdefault("extra_body", {}).update(
+                {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+            )
+
+        # Model-level thinking injection for MiMo thinking-capable models.
+        # Covers direct Xiaomi requests and gateway-routed names such as
+        # "xiaomi/mimo-v2.5-pro"; unsupported variants like mimo-v2-flash
+        # intentionally receive no thinking payload.
+        if reasoning_effort is not None and _is_mimo_thinking_model(model_name):
             thinking_enabled = semantic_effort not in {"minimal", "none"}
             kwargs.setdefault("extra_body", {}).update(
                 {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}

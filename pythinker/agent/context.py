@@ -160,23 +160,22 @@ class ContextBuilder:
         *,
         runtime_context: str | None = None,
     ) -> str | list[dict[str, Any]]:
-        """Build a user-role message body, optionally prefixed with runtime context.
+        """Build a user-role message body, optionally suffixed with runtime context.
 
         Public API consumed by `build_messages` and by callers (e.g. the agent
         loop's pending-message drain) that need user content without poking
         the internal image-only helper.
 
-        When ``runtime_context`` is provided, it is merged BEFORE the user
-        content, matching the order `build_messages` uses for the initial turn
-        message: a single user message that prevents consecutive same-role
-        messages some providers reject.
+        When ``runtime_context`` is provided, it is merged AFTER the user
+        content: one user message avoids provider-rejected consecutive roles,
+        while keeping the user-content prefix stable for prompt-cache hits.
         """
         user_content = self._build_user_content(content, media)
         if runtime_context is None:
             return user_content
         if isinstance(user_content, str):
-            return f"{runtime_context}\n\n{user_content}"
-        return [{"type": "text", "text": runtime_context}] + user_content
+            return f"{user_content}\n\n{runtime_context}"
+        return user_content + [{"type": "text", "text": runtime_context}]
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""

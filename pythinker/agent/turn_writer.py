@@ -5,7 +5,7 @@ responsibilities:
 
 1. **save_turn(session, messages, skip)** — append per-role messages from a
    completed turn into `session.messages`, stripping volatile context (the
-   runtime-context block prepended to the initial user message) and
+   runtime-context block appended to the initial user message) and
    truncating oversized tool results to keep history readable.
 
 2. **persist_subagent_followup(session, msg)** — fold subagent results into
@@ -68,7 +68,7 @@ class TurnWriter:
                 drop_runtime
                 and block.get("type") == "text"
                 and isinstance(block.get("text"), str)
-                and block["text"].startswith(ContextBuilder._RUNTIME_CONTEXT_TAG)
+                and ContextBuilder._RUNTIME_CONTEXT_TAG in block["text"]
             ):
                 continue
 
@@ -119,22 +119,26 @@ class TurnWriter:
                         continue
                     entry["content"] = filtered
             elif role == "user":
-                if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
-                    # Strip the entire runtime-context block (including any session summary).
-                    # The block is bounded by _RUNTIME_CONTEXT_TAG and _RUNTIME_CONTEXT_END.
-                    end_marker = ContextBuilder._RUNTIME_CONTEXT_END
-                    end_pos = content.find(end_marker)
-                    if end_pos >= 0:
-                        after = content[end_pos + len(end_marker):].lstrip("\n")
-                        if after:
-                            entry["content"] = after
+                if isinstance(content, str) and ContextBuilder._RUNTIME_CONTEXT_TAG in content:
+                    # Strip the runtime-context block (including any session summary),
+                    # which is appended after user content for prompt-cache stability.
+                    # Keep backward compatibility with older prefix-ordered turns.
+                    tag_pos = content.find(ContextBuilder._RUNTIME_CONTEXT_TAG)
+                    if tag_pos == 0:
+                        end_marker = ContextBuilder._RUNTIME_CONTEXT_END
+                        end_pos = content.find(end_marker)
+                        if end_pos >= 0:
+                            after = content[end_pos + len(end_marker):].lstrip("\n")
+                            if after:
+                                entry["content"] = after
+                            else:
+                                continue
                         else:
                             continue
                     else:
-                        # Fallback: no end marker found, strip the tag prefix
-                        after_tag = content[len(ContextBuilder._RUNTIME_CONTEXT_TAG):].lstrip("\n")
-                        if after_tag.strip():
-                            entry["content"] = after_tag
+                        before = content[:tag_pos].rstrip("\n ")
+                        if before:
+                            entry["content"] = before
                         else:
                             continue
                 if isinstance(content, list):

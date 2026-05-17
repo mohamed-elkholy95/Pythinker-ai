@@ -58,6 +58,51 @@ async def test_brave_search(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_brave_search_retries_once_after_rate_limit(monkeypatch):
+    calls = 0
+    sleeps: list[float] = []
+
+    async def mock_get(self, url, **kw):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return _response(status=429, json={"error": "rate limited"})
+        return _response(json={
+            "web": {"results": [{"title": "Retry OK", "url": "https://example.com", "description": "ok"}]}
+        })
+
+    async def fake_sleep(delay: float):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+    monkeypatch.setattr("pythinker.agent.tools.web.asyncio.sleep", fake_sleep)
+
+    tool = _tool(provider="brave", api_key="brave-key")
+    result = await tool.execute(query="pythinker", count=1)
+
+    assert calls == 2
+    assert sleeps == [1.0]
+    assert "Retry OK" in result
+
+
+@pytest.mark.asyncio
+async def test_brave_search_reports_rate_limit_after_retry(monkeypatch):
+    async def mock_get(self, url, **kw):
+        return _response(status=429, json={"error": "rate limited"})
+
+    async def fake_sleep(delay: float):
+        return None
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+    monkeypatch.setattr("pythinker.agent.tools.web.asyncio.sleep", fake_sleep)
+
+    tool = _tool(provider="brave", api_key="brave-key")
+    result = await tool.execute(query="pythinker", count=1)
+
+    assert "Brave search rate limited after retry" in result
+
+
+@pytest.mark.asyncio
 async def test_tavily_search(monkeypatch):
     async def mock_post(self, url, **kw):
         assert "tavily" in url

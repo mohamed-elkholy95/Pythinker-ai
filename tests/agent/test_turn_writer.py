@@ -68,6 +68,7 @@ def test_save_turn_drops_runtime_context_only_user_message() -> None:
 
 
 def test_save_turn_strips_runtime_context_prefix_keeps_user_text() -> None:
+    """Backward compatibility for turns persisted before runtime context moved after content."""
     writer = _make_writer()
     session = Session(key="cli:c")
     full = (
@@ -75,6 +76,21 @@ def test_save_turn_strips_runtime_context_prefix_keeps_user_text() -> None:
         + "\nCurrent Time: 2026\n"
         + ContextBuilder._RUNTIME_CONTEXT_END
         + "\n\nthe real user message"
+    )
+    writer.save_turn(session, [{"role": "user", "content": full}], skip=0)
+    assert len(session.messages) == 1
+    assert session.messages[0]["content"] == "the real user message"
+
+
+def test_save_turn_strips_runtime_context_suffix_keeps_user_text() -> None:
+    writer = _make_writer()
+    session = Session(key="cli:c")
+    full = (
+        "the real user message"
+        + "\n\n"
+        + ContextBuilder._RUNTIME_CONTEXT_TAG
+        + "\nCurrent Time: 2026\n"
+        + ContextBuilder._RUNTIME_CONTEXT_END
     )
     writer.save_turn(session, [{"role": "user", "content": full}], skip=0)
     assert len(session.messages) == 1

@@ -23,7 +23,7 @@ def test_build_user_content_text_only_no_runtime_context(tmp_path: Path) -> None
     assert result == "hello"
 
 
-def test_build_user_content_text_with_runtime_context_prepends_string(tmp_path: Path) -> None:
+def test_build_user_content_text_with_runtime_context_appends_string(tmp_path: Path) -> None:
     builder = _make_builder(tmp_path)
     result = builder.build_user_content(
         "hello",
@@ -31,10 +31,10 @@ def test_build_user_content_text_with_runtime_context_prepends_string(tmp_path: 
         runtime_context="[ctx]\nCurrent Time: 2026\n[/ctx]",
     )
     assert isinstance(result, str)
-    assert result == "[ctx]\nCurrent Time: 2026\n[/ctx]\n\nhello"
+    assert result == "hello\n\n[ctx]\nCurrent Time: 2026\n[/ctx]"
 
 
-def test_build_user_content_image_with_runtime_context_prepends_text_block(tmp_path: Path) -> None:
+def test_build_user_content_image_with_runtime_context_appends_text_block(tmp_path: Path) -> None:
     builder = _make_builder(tmp_path)
     png = tmp_path / "test.png"
     png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
@@ -46,7 +46,7 @@ def test_build_user_content_image_with_runtime_context_prepends_text_block(tmp_p
     )
 
     assert isinstance(result, list)
-    assert result[0] == {"type": "text", "text": "RUNTIME_CTX_MARKER"}
+    assert result[-1] == {"type": "text", "text": "RUNTIME_CTX_MARKER"}
     types = [block["type"] for block in result]
     assert "image_url" in types
 
@@ -61,7 +61,7 @@ def test_build_user_content_image_no_runtime_context_returns_image_blocks_only(
     result = builder.build_user_content("describe", [str(png)])
 
     assert isinstance(result, list)
-    # No runtime_context: the first block must not be a synthetic runtime-context text block.
+    # No runtime_context: no synthetic runtime-context text block should appear.
     assert result[0]["type"] in {"image_url", "text"}
     if result[0]["type"] == "text":
         assert "Current Time" not in result[0]["text"]
@@ -69,10 +69,10 @@ def test_build_user_content_image_no_runtime_context_returns_image_blocks_only(
 
 
 def test_build_messages_still_includes_runtime_context_via_public_api(tmp_path: Path) -> None:
-    """build_messages should keep prepending runtime context after the refactor.
+    """build_messages should keep appending runtime context after the refactor.
 
     Verifies the refactor of build_messages → build_user_content(..., runtime_context=...)
-    preserves the existing behavior: the final user message carries the runtime context
+    preserves the behavior that the final user message carries the runtime context
     block via the shared public method.
     """
     builder = _make_builder(tmp_path)

@@ -792,8 +792,18 @@ def test_volcengine_uses_max_completion_tokens() -> None:
 
 
 def test_xiaomi_mimo_thinking_disabled_for_none() -> None:
-    kw = _build_kwargs_for("xiaomi_mimo", "MiMo-VL-7B-RL", reasoning_effort="none")
+    kw = _build_kwargs_for("xiaomi_mimo", "mimo-v2.5-pro", reasoning_effort="none")
     assert kw["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
+def test_xiaomi_mimo_gateway_thinking_enabled_with_prefix() -> None:
+    kw = _build_kwargs_for("openrouter", "xiaomi/mimo-v2.5-pro", reasoning_effort="medium")
+    assert kw["extra_body"] == {"thinking": {"type": "enabled"}}
+
+
+def test_xiaomi_mimo_flash_does_not_get_thinking_payload() -> None:
+    kw = _build_kwargs_for("openrouter", "xiaomi/mimo-v2-flash", reasoning_effort="medium")
+    assert "extra_body" not in kw
 
 
 def test_byteplus_thinking_disabled_for_minimal() -> None:

@@ -5,6 +5,10 @@ Codex provider rejects (or warns about) models the ChatGPT backend will refuse
 and exposes the published gpt-5.5 limits to callers.
 """
 
+from types import SimpleNamespace
+
+import pytest
+
 from pythinker.providers.openai_codex_provider import OpenAICodexProvider
 
 
@@ -52,3 +56,64 @@ def test_base_provider_returns_none_by_default():
     from pythinker.providers.base import LLMProvider
 
     assert LLMProvider.get_model_limits("anything") is None
+
+
+@pytest.mark.asyncio
+async def test_prompt_cache_key_uses_stable_conversation_prefix(monkeypatch):
+    """Only the stable system+first-user prefix should seed Codex prompt caching."""
+    bodies: list[dict] = []
+
+    monkeypatch.setattr(
+        "pythinker.providers.openai_codex_provider._locked_get_codex_token",
+        lambda: SimpleNamespace(account_id="acct", access="token"),
+    )
+
+    async def fake_request(url, headers, body, verify, on_content_delta=None):
+        bodies.append(body)
+        return "ok", [], "stop"
+
+    monkeypatch.setattr("pythinker.providers.openai_codex_provider._request_codex", fake_request)
+
+    provider = OpenAICodexProvider()
+    await provider.chat([
+        {"role": "system", "content": "You are pythinker."},
+        {"role": "user", "content": "first request"},
+        {"role": "assistant", "content": "first answer"},
+    ])
+    await provider.chat([
+        {"role": "system", "content": "You are pythinker."},
+        {"role": "user", "content": "first request"},
+        {"role": "assistant", "content": "different answer"},
+    ])
+    await provider.chat([
+        {"role": "system", "content": "You are pythinker."},
+        {"role": "user", "content": "different request"},
+        {"role": "assistant", "content": "first answer"},
+    ])
+
+    assert bodies[0]["prompt_cache_key"] == bodies[1]["prompt_cache_key"]
+    assert bodies[0]["prompt_cache_key"] != bodies[2]["prompt_cache_key"]
+
+
+@pytest.mark.asyncio
+async def test_codex_reasoning_effort_none_omits_reasoning_body(monkeypatch):
+    bodies: list[dict] = []
+
+    monkeypatch.setattr(
+        "pythinker.providers.openai_codex_provider._locked_get_codex_token",
+        lambda: SimpleNamespace(account_id="acct", access="token"),
+    )
+
+    async def fake_request(url, headers, body, verify, on_content_delta=None):
+        bodies.append(body)
+        return "ok", [], "stop"
+
+    monkeypatch.setattr("pythinker.providers.openai_codex_provider._request_codex", fake_request)
+
+    provider = OpenAICodexProvider()
+    await provider.chat(
+        [{"role": "user", "content": "hello"}],
+        reasoning_effort="none",
+    )
+
+    assert "reasoning" not in bodies[0]

@@ -85,6 +85,7 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     assert "Channel: cli" in user_content
     assert "Chat ID: direct" in user_content
     assert "Return exactly: OK" in user_content
+    assert user_content.index("Return exactly: OK") < user_content.index(ContextBuilder._RUNTIME_CONTEXT_TAG)
 
 
 def test_unprocessed_history_injected_into_system_prompt(tmp_path) -> None:

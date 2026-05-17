@@ -112,11 +112,11 @@ class OpenAICodexProvider(LLMProvider):
             "input": input_items,
             "text": {"verbosity": "medium"},
             "include": ["reasoning.encrypted_content"],
-            "prompt_cache_key": _prompt_cache_key(messages),
+            "prompt_cache_key": _prompt_cache_key(messages[:2]),
             "tool_choice": tool_choice or "auto",
             "parallel_tool_calls": True,
         }
-        if reasoning_effort:
+        if reasoning_effort and reasoning_effort.lower() != "none":
             body["reasoning"] = {"effort": reasoning_effort}
         if tools:
             body["tools"] = convert_tools(tools)

@@ -34,6 +34,7 @@ export interface InboundMessage {
 
 export interface WhatsAppClientOptions {
   authDir: string;
+  pairingPhone?: string;
   onMessage: (msg: InboundMessage) => void;
   onQR: (qr: string) => void;
   onStatus: (status: string) => void;
@@ -43,6 +44,8 @@ export class WhatsAppClient {
   private sock: any = null;
   private options: WhatsAppClientOptions;
   private reconnecting = false;
+  private pairingCodeRequested = false;
+  private pairingNoticePrinted = false;
 
   constructor(options: WhatsAppClientOptions) {
     this.options = options;
@@ -73,12 +76,32 @@ export class WhatsAppClient {
     return mentioned.some((jid: string) => selfIds.has(this.normalizeJid(jid)));
   }
 
+  private async requestPairingCode(): Promise<void> {
+    if (!this.options.pairingPhone || this.pairingCodeRequested) return;
+    if (this.sock?.authState?.creds?.registered) return;
+
+    this.pairingCodeRequested = true;
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const code = await this.sock.requestPairingCode(this.options.pairingPhone);
+      console.log('\n🔢 WhatsApp pairing code: ' + code);
+      console.log('Open WhatsApp → Linked Devices → Link with phone number instead.\n');
+    } catch (err) {
+      this.pairingCodeRequested = false;
+      console.error('Failed to request WhatsApp pairing code:', err);
+    }
+  }
+
   async connect(): Promise<void> {
     const logger = pino({ level: 'silent' });
     const { state, saveCreds } = await useMultiFileAuthState(this.options.authDir);
     const { version } = await fetchLatestBaileysVersion();
 
     console.log(`Using Baileys version: ${version.join('.')}`);
+    if (!state.creds.registered) {
+      this.pairingCodeRequested = false;
+      this.pairingNoticePrinted = false;
+    }
 
     // Create socket
     this.sock = makeWASocket({
@@ -101,15 +124,29 @@ export class WhatsAppClient {
       });
     }
 
+    if (this.options.pairingPhone && !state.creds.registered) {
+      console.log('\n📱 Pairing-code mode enabled; terminal QR display suppressed.\n');
+      this.pairingNoticePrinted = true;
+      void this.requestPairingCode();
+    }
+
     // Handle connection updates
     this.sock.ev.on('connection.update', async (update: any) => {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        // Display QR code in terminal
-        console.log('\n📱 Scan this QR code with WhatsApp (Linked Devices):\n');
-        qrcode.generate(qr, { small: true });
-        this.options.onQR(qr);
+        if (this.options.pairingPhone) {
+          if (!this.pairingNoticePrinted) {
+            console.log('\n📱 Pairing-code mode enabled; terminal QR display suppressed.\n');
+            this.pairingNoticePrinted = true;
+          }
+          await this.requestPairingCode();
+        } else {
+          // Display QR code in terminal
+          console.log('\n📱 Scan this QR code with WhatsApp (Linked Devices):\n');
+          qrcode.generate(qr, { small: true });
+          this.options.onQR(qr);
+        }
       }
 
       if (connection === 'close') {

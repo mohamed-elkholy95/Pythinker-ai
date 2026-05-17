@@ -186,6 +186,14 @@ pythinker channels login whatsapp
 # Scan QR with WhatsApp → Settings → Linked Devices
 ```
 
+Prefer a compact text code instead of the terminal QR? Prefix the login command with your
+country-code phone number, digits only:
+
+```bash
+WHATSAPP_PAIRING_PHONE=15551234567 pythinker channels login whatsapp
+# WhatsApp → Linked Devices → Link with phone number instead
+```
+
 **2. Configure**
 
 ```json

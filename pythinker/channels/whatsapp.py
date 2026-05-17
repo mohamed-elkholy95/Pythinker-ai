@@ -98,11 +98,11 @@ class WhatsAppChannel(BaseChannel):
 
     async def login(self, force: bool = False) -> bool:
         """
-        Set up and run the WhatsApp bridge for QR code login.
+        Set up and run the WhatsApp bridge for login.
 
         This spawns the Node.js bridge process which handles the WhatsApp
-        authentication flow. The process blocks until the user scans the QR code
-        or interrupts with Ctrl+C.
+        authentication flow. The process blocks until the user scans the QR code,
+        enters the pairing code, or interrupts with Ctrl+C.
         """
         try:
             bridge_dir = _ensure_bridge_setup()
@@ -114,7 +114,7 @@ class WhatsAppChannel(BaseChannel):
         env["BRIDGE_TOKEN"] = self._effective_bridge_token()
         env["AUTH_DIR"] = str(_bridge_token_path().parent)
 
-        logger.info("Starting WhatsApp bridge for QR login...")
+        logger.info("Starting WhatsApp bridge for login...")
         try:
             subprocess.run(
                 [shutil.which("npm"), "start"], cwd=bridge_dir, check=True, env=env

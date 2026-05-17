@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Collection
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
@@ -10,6 +11,8 @@ from loguru import logger
 
 from pythinker.session.manager import Session, SessionManager
 
+LockProvider = Callable[[str], asyncio.Lock]
+
 if TYPE_CHECKING:
     from pythinker.agent.memory import Consolidator
 
@@ -17,11 +20,17 @@ if TYPE_CHECKING:
 class AutoCompact:
     _RECENT_SUFFIX_MESSAGES = 8
 
-    def __init__(self, sessions: SessionManager, consolidator: Consolidator,
-                 session_ttl_minutes: int = 0):
+    def __init__(
+        self,
+        sessions: SessionManager,
+        consolidator: Consolidator,
+        session_ttl_minutes: int = 0,
+        lock_provider: LockProvider | None = None,
+    ):
         self.sessions = sessions
         self.consolidator = consolidator
         self._ttl = session_ttl_minutes
+        self._lock_provider = lock_provider
         self._archiving: set[str] = set()
         self._summaries: dict[str, tuple[str, datetime]] = {}
 
@@ -74,6 +83,13 @@ class AutoCompact:
                 schedule_background(self._archive(key))
 
     async def _archive(self, key: str) -> None:
+        if self._lock_provider is not None:
+            async with self._lock_provider(key):
+                await self._archive_inner(key)
+            return
+        await self._archive_inner(key)
+
+    async def _archive_inner(self, key: str) -> None:
         try:
             self.sessions.invalidate(key)
             session = self.sessions.get_or_create(key)

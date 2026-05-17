@@ -7,7 +7,7 @@ import inspect
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 from loguru import logger
 
@@ -73,10 +73,6 @@ _SNIP_SAFETY_BUFFER = 1024
 _MIN_SNIP_PROMPT_BUDGET = 128
 _MICROCOMPACT_KEEP_RECENT = 10
 _MICROCOMPACT_MIN_CHARS = 500
-_COMPACTABLE_TOOLS = frozenset({
-    "read_file", "exec", "grep", "glob",
-    "web_search", "web_fetch", "list_dir",
-})
 _BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
 
 
@@ -152,6 +148,15 @@ class AgentRunner:
 
     def __init__(self, provider: LLMProvider):
         self.provider = provider
+        self._tool_is_compactable: Callable[[str], bool] = lambda _name: True
+
+    def bind_tool_registry(self, registry: ToolRegistry) -> None:
+        """Use a tool registry to decide whether results may be microcompacted."""
+        def _lookup(name: str) -> bool:
+            tool = registry.get(name)
+            return bool(tool and getattr(tool, "compactable", True))
+
+        self._tool_is_compactable = _lookup
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
@@ -1050,12 +1055,20 @@ class AgentRunner:
             offset += 1
         return updated
 
+    def _tool_is_compactable_default(self, name: str) -> bool:
+        return True
+
     @staticmethod
-    def _microcompact(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _microcompact_with_filter(
+        messages: list[dict[str, Any]],
+        is_compactable: Callable[[str], bool],
+    ) -> list[dict[str, Any]]:
         """Replace old compactable tool results with one-line summaries."""
         compactable_indices: list[int] = []
         for idx, msg in enumerate(messages):
-            if msg.get("role") == "tool" and msg.get("name") in _COMPACTABLE_TOOLS:
+            if msg.get("role") != "tool":
+                continue
+            if is_compactable(str(msg.get("name", ""))):
                 compactable_indices.append(idx)
 
         if len(compactable_indices) <= _MICROCOMPACT_KEEP_RECENT:
@@ -1075,6 +1088,9 @@ class AgentRunner:
             updated[idx]["content"] = summary
 
         return updated if updated is not None else messages
+
+    def _microcompact(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return self._microcompact_with_filter(messages, self._tool_is_compactable)
 
     def _apply_tool_result_budget(
         self,

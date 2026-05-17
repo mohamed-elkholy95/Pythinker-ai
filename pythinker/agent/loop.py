@@ -295,6 +295,7 @@ class AgentLoop:
         )
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
+        self.runner.bind_tool_registry(self.tools)
         self.task_store = TaskStore(self.workspace)
         self.subagents = SubagentManager(
             provider=provider,

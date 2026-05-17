@@ -1,22 +1,27 @@
 """Token-counting utilities (tiktoken-based with provider fallback)."""
+from __future__ import annotations
 
 import json
 from typing import Any
 
 
+def _get_encoding(name: str) -> Any:
+    import tiktoken
+    try:
+        return tiktoken.get_encoding(name)
+    except Exception:
+        return tiktoken.get_encoding("cl100k_base")
+
+
 def estimate_prompt_tokens(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
+    *,
+    encoding: str = "cl100k_base",
 ) -> int:
-    """Estimate prompt tokens with tiktoken.
-
-    Counts all fields that providers send to the LLM: content, tool_calls,
-    reasoning_content, tool_call_id, name, plus per-message framing overhead.
-    """
+    """Estimate prompt tokens with tiktoken using ``encoding``."""
     try:
-        import tiktoken
-
-        enc = tiktoken.get_encoding("cl100k_base")
+        enc = _get_encoding(encoding)
         parts: list[str] = []
         for msg in messages:
             content = msg.get("content")
@@ -28,30 +33,23 @@ def estimate_prompt_tokens(
                         txt = part.get("text", "")
                         if txt:
                             parts.append(txt)
-
-            tc = msg.get("tool_calls")
-            if tc:
-                parts.append(json.dumps(tc, ensure_ascii=False))
-
+            if msg.get("tool_calls"):
+                parts.append(json.dumps(msg["tool_calls"], ensure_ascii=False))
             rc = msg.get("reasoning_content")
             if isinstance(rc, str) and rc:
                 parts.append(rc)
-
             for key in ("name", "tool_call_id"):
                 value = msg.get(key)
                 if isinstance(value, str) and value:
                     parts.append(value)
-
         if tools:
             parts.append(json.dumps(tools, ensure_ascii=False))
-
-        per_message_overhead = len(messages) * 4
-        return len(enc.encode("\n".join(parts))) + per_message_overhead
+        return len(enc.encode("\n".join(parts))) + len(messages) * 4
     except Exception:
         return 0
 
 
-def estimate_message_tokens(message: dict[str, Any]) -> int:
+def estimate_message_tokens(message: dict[str, Any], *, encoding: str = "cl100k_base") -> int:
     """Estimate prompt tokens contributed by one persisted message."""
     content = message.get("content")
     parts: list[str] = []
@@ -67,26 +65,20 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
                 parts.append(json.dumps(part, ensure_ascii=False))
     elif content is not None:
         parts.append(json.dumps(content, ensure_ascii=False))
-
     for key in ("name", "tool_call_id"):
         value = message.get(key)
         if isinstance(value, str) and value:
             parts.append(value)
     if message.get("tool_calls"):
         parts.append(json.dumps(message["tool_calls"], ensure_ascii=False))
-
     rc = message.get("reasoning_content")
     if isinstance(rc, str) and rc:
         parts.append(rc)
-
     payload = "\n".join(parts)
     if not payload:
         return 4
     try:
-        import tiktoken
-
-        enc = tiktoken.get_encoding("cl100k_base")
-        return max(4, len(enc.encode(payload)) + 4)
+        return max(4, len(_get_encoding(encoding).encode(payload)) + 4)
     except Exception:
         return max(4, len(payload) // 4 + 4)
 
@@ -96,8 +88,10 @@ def estimate_prompt_tokens_chain(
     model: str | None,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
+    *,
+    encoding: str = "cl100k_base",
 ) -> tuple[int, str]:
-    """Estimate prompt tokens via provider counter first, then tiktoken fallback."""
+    """Estimate prompt tokens synchronously via provider-local then tiktoken counters."""
     provider_counter = getattr(provider, "estimate_prompt_tokens", None)
     if callable(provider_counter):
         try:
@@ -106,8 +100,25 @@ def estimate_prompt_tokens_chain(
                 return int(tokens), str(source or "provider_counter")
         except Exception:
             pass
+    estimated = estimate_prompt_tokens(messages, tools, encoding=encoding)
+    return (int(estimated), f"tiktoken:{encoding}") if estimated > 0 else (0, "none")
 
-    estimated = estimate_prompt_tokens(messages, tools)
-    if estimated > 0:
-        return int(estimated), "tiktoken"
-    return 0, "none"
+
+async def async_estimate_prompt_tokens_chain(
+    provider: Any,
+    model: str | None,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None = None,
+    *,
+    encoding: str = "cl100k_base",
+) -> tuple[int, str]:
+    """Estimate prompt tokens, preferring async provider counters when present."""
+    async_counter = getattr(provider, "async_estimate_prompt_tokens", None)
+    if callable(async_counter):
+        try:
+            tokens, source = await async_counter(messages, tools, model)
+            if isinstance(tokens, (int, float)) and tokens > 0:
+                return int(tokens), str(source or "provider_counter")
+        except Exception:
+            pass
+    return estimate_prompt_tokens_chain(provider, model, messages, tools, encoding=encoding)

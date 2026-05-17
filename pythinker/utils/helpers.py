@@ -41,6 +41,7 @@ from pythinker.utils.time import (
     timestamp,
 )
 from pythinker.utils.tokens import (
+    async_estimate_prompt_tokens_chain,
     estimate_message_tokens,
     estimate_prompt_tokens,
     estimate_prompt_tokens_chain,

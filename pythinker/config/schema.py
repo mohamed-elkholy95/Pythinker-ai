@@ -405,6 +405,14 @@ class ModelMetadataOverride(Base):
     supports_json_schema: bool | None = None
     supports_reasoning: bool | None = None
     preferred_api: str | None = None
+    input_cost_per_million: float | None = None
+    cached_input_cost_per_million: float | None = None
+    output_cost_per_million: float | None = None
+    currency: str | None = None
+    pricing_source_url: str | None = None
+    long_context_threshold_tokens: int | None = None
+    long_context_input_multiplier: float | None = None
+    long_context_output_multiplier: float | None = None
 
 
 class ModelsConfig(Base):

@@ -80,6 +80,8 @@ export interface AdminUsage {
     total_tokens: number;
     cost: number | null;
     currency: string | null;
+    priced_turns?: number;
+    unpriced_turns?: number;
   };
   ledger?: Record<string, unknown>;
 }

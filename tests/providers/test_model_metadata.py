@@ -13,6 +13,10 @@ def test_openai_codex_prefix_resolves_to_curated_gpt_profile():
     assert meta.total_context_tokens == 400_000
     assert meta.encoding == "o200k_base"
     assert meta.source == MetadataSource.CURATED
+    assert meta.input_cost_per_million == 5.0
+    assert meta.cached_input_cost_per_million == 0.5
+    assert meta.output_cost_per_million == 30.0
+    assert meta.currency == "USD"
 
 
 def test_chat_preview_keeps_smaller_usable_input_budget():

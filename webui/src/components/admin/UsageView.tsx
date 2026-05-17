@@ -126,6 +126,8 @@ function SummaryView({ data }: { data: AdminSurfaces }) {
     total_tokens: 0,
     cost: null,
     currency: null,
+    priced_turns: 0,
+    unpriced_turns: 0,
   };
 
   const channelRollup = useMemo(() => {
@@ -160,7 +162,7 @@ function SummaryView({ data }: { data: AdminSurfaces }) {
           icon={<CreditCard className="h-4 w-4" />}
           label="Cost accrued"
           value={formatCost(consumption.cost, consumption.currency)}
-          hint={consumption.cost === null ? "Not tracked" : "Lifetime"}
+          hint={consumption.cost === null ? "Not tracked" : consumption.unpriced_turns ? "Estimated · partial" : "Estimated"}
           tone="amber"
         />
         <KPICard

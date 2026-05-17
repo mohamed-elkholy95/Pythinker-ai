@@ -64,8 +64,8 @@ The dashboard shows:
   sessions that the normal chat sidebar intentionally hides.
 - Usage: last-turn provider token counts and a workspace-scoped usage ledger at
   `<workspace>/admin/usage.jsonl`. Pythinker records normalized token counts
-  after each completed turn. Monetary cost is not calculated unless a future
-  pricing table is configured.
+  after each completed turn. When the active model metadata includes pricing,
+  the dashboard shows an estimated cost total; otherwise it remains "Not tracked".
 - Models: configured model, alternate models, and provider recommendations.
 - Config: a redacted config tree plus write controls for full workspace config.
 
@@ -968,7 +968,11 @@ Runtime startup stays offline by default. Maintainers refresh the checked-in met
         "inputTokens": 272000,
         "maxOutputTokens": 128000,
         "totalContextTokens": 400000,
-        "encoding": "o200k_base"
+        "encoding": "o200k_base",
+        "inputCostPerMillion": 5.0,
+        "cachedInputCostPerMillion": 0.5,
+        "outputCostPerMillion": 30.0,
+        "currency": "USD"
       }
     },
     "azureDeployments": {
@@ -978,7 +982,7 @@ Runtime startup stays offline by default. Maintainers refresh the checked-in met
 }
 ```
 
-`metadataMode = "auto"` uses curated metadata plus local overrides. `azureDeployments` maps an Azure deployment name back to the base model profile so suffix matching and token limits stay accurate.
+`metadataMode = "auto"` uses curated metadata plus local overrides. `azureDeployments` maps an Azure deployment name back to the base model profile so suffix matching and token limits stay accurate. Pricing fields are optional and are used only for best-effort usage-ledger estimates; missing pricing leaves the WebUI cost card untracked instead of inventing a number.
 
 ## Logging
 

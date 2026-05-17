@@ -13,6 +13,7 @@ All notable user-visible changes to Pythinker land here. The project follows
 - Native Anthropic providers can count tokens via `POST /v1/messages/count_tokens` with a 60s in-memory TTL cache and 429-aware retry.
 - `BudgetPolicy` unifies consolidator and runner snip budget math and clamps invalid output reserves instead of crashing a turn.
 - WebUI usage displays a stacked `floor / history / headroom` bar with `floor_status`, and assistant turns emit a PII-safe structured `context_turn` event for estimator drift tracking.
+- Usage ledger rows now include estimated USD costs for priced models, starting with GPT-5.5 input/cache/output pricing from the OpenAI model docs; the WebUI cost card shows estimated or partial totals when available.
 
 ### Fixed
 

@@ -238,8 +238,10 @@ class AdminService:
             "sessions": self.sessions()["sessions"],
             "consumption": {
                 "total_tokens": int(ledger.get("total_tokens", 0)),
-                "cost": None,
-                "currency": None,
+                "cost": ledger.get("cost"),
+                "currency": ledger.get("currency"),
+                "priced_turns": int(ledger.get("priced_turns", 0)),
+                "unpriced_turns": int(ledger.get("unpriced_turns", 0)),
             },
             "ledger": ledger,
         }

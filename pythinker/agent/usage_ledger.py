@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from pythinker.agent.pricing import estimate_usage_cost
+
 
 def _ledger_path(workspace: Path) -> Path:
     return workspace / "admin" / "usage.jsonl"
@@ -34,18 +36,22 @@ def record_turn_usage(
         return
     path = _ledger_path(workspace)
     path.parent.mkdir(parents=True, exist_ok=True)
+    normalized_usage = {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": total,
+        "cached_tokens": _usage_int(usage, "cached_tokens"),
+    }
     row = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "session_key": session_key,
         "provider": provider,
         "model": model,
-        "usage": {
-            "prompt_tokens": prompt,
-            "completion_tokens": completion,
-            "total_tokens": total,
-            "cached_tokens": _usage_int(usage, "cached_tokens"),
-        },
+        "usage": normalized_usage,
     }
+    estimated_cost = estimate_usage_cost(model, normalized_usage)
+    if estimated_cost is not None:
+        row["cost"] = estimated_cost
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
@@ -58,6 +64,10 @@ def load_usage_summary(workspace: Path, *, recent_limit: int = 20) -> dict[str, 
         "completion_tokens": 0,
         "cached_tokens": 0,
         "total_tokens": 0,
+        "cost": None,
+        "currency": None,
+        "priced_turns": 0,
+        "unpriced_turns": 0,
         "by_model": {},
         "recent": [],
     }
@@ -84,6 +94,27 @@ def load_usage_summary(workspace: Path, *, recent_limit: int = 20) -> dict[str, 
             summary["completion_tokens"] += completion
             summary["cached_tokens"] += cached
             summary["total_tokens"] += total
+            row_cost = row.get("cost")
+            if not isinstance(row_cost, dict):
+                row_cost = estimate_usage_cost(model, {
+                    "prompt_tokens": prompt,
+                    "completion_tokens": completion,
+                    "cached_tokens": cached,
+                    "total_tokens": total,
+                })
+            cost_value: float | None = None
+            currency: str | None = None
+            if isinstance(row_cost, dict):
+                raw_cost = row_cost.get("cost")
+                if isinstance(raw_cost, int | float):
+                    cost_value = float(raw_cost)
+                    currency = str(row_cost.get("currency") or "USD")
+            if cost_value is None:
+                summary["unpriced_turns"] += 1
+            else:
+                summary["priced_turns"] += 1
+                summary["cost"] = (float(summary["cost"] or 0.0) + cost_value)
+                summary["currency"] = summary["currency"] or currency
             by_model = summary["by_model"].setdefault(
                 model,
                 {
@@ -92,6 +123,10 @@ def load_usage_summary(workspace: Path, *, recent_limit: int = 20) -> dict[str, 
                     "completion_tokens": 0,
                     "cached_tokens": 0,
                     "total_tokens": 0,
+                    "cost": None,
+                    "currency": None,
+                    "priced_turns": 0,
+                    "unpriced_turns": 0,
                 },
             )
             by_model["turns"] += 1
@@ -99,7 +134,13 @@ def load_usage_summary(workspace: Path, *, recent_limit: int = 20) -> dict[str, 
             by_model["completion_tokens"] += completion
             by_model["cached_tokens"] += cached
             by_model["total_tokens"] += total
-            rows.append({
+            if cost_value is None:
+                by_model["unpriced_turns"] += 1
+            else:
+                by_model["priced_turns"] += 1
+                by_model["cost"] = float(by_model["cost"] or 0.0) + cost_value
+                by_model["currency"] = by_model["currency"] or currency
+            recent_row = {
                 "timestamp": row.get("timestamp"),
                 "session_key": row.get("session_key"),
                 "provider": row.get("provider"),
@@ -110,6 +151,14 @@ def load_usage_summary(workspace: Path, *, recent_limit: int = 20) -> dict[str, 
                     "cached_tokens": cached,
                     "total_tokens": total,
                 },
-            })
+                "cost": cost_value,
+                "currency": currency,
+            }
+            rows.append(recent_row)
+    if summary["cost"] is not None:
+        summary["cost"] = round(float(summary["cost"]), 10)
+    for by_model in summary["by_model"].values():
+        if by_model["cost"] is not None:
+            by_model["cost"] = round(float(by_model["cost"]), 10)
     summary["recent"] = rows[-recent_limit:][::-1]
     return summary

@@ -11,6 +11,7 @@ _SESSION_KEY_HASH_LEN = 12
 
 def _redact_session_key(session_key: str) -> str:
     """Hash the chat/user identifier while preserving the channel prefix."""
+    session_key = str(session_key)
     if ":" not in session_key:
         digest = hashlib.sha256(session_key.encode("utf-8")).hexdigest()
         return digest[:_SESSION_KEY_HASH_LEN]

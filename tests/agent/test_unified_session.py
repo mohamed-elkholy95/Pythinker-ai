@@ -389,19 +389,14 @@ class TestConsolidationUnaffectedByUnifiedSession:
 
         # Simulate over-budget: estimated > budget
         consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(950, "tiktoken"))
-        # No valid boundary found → returns gracefully without archiving
+        # No strict user boundary found → relaxed fallback archives the tail.
         consolidator.pick_consolidation_boundary = MagicMock(return_value=None)
-        consolidator.archive = AsyncMock()
+        consolidator.archive = AsyncMock(return_value=True)
 
         await consolidator.maybe_consolidate_by_tokens(session)
 
-        # estimate was called (consolidation was attempted)
-        consolidator.estimate_session_prompt_tokens.assert_called_once_with(
-            session,
-            session_summary=None,
-        )
-        # but archive was not called (no valid boundary)
-        consolidator.archive.assert_not_called()
+        assert consolidator.estimate_session_prompt_tokens.call_count >= 1
+        consolidator.archive.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

@@ -1573,7 +1573,17 @@ class AgentLoop:
             context=ctx,
             context_seed={"channel": channel, "sender_id": sender_id, "chat_id": chat_id},
         )
-        lock = self._session_locks.setdefault(session_key, asyncio.Lock())
+        session_locks = getattr(self, "_session_locks", None)
+        if session_locks is None:
+            return await self._process_message(
+                msg,
+                session_key=session_key,
+                on_progress=on_progress,
+                on_stream=on_stream,
+                on_stream_end=on_stream_end,
+                on_tool_event=on_tool_event,
+            )
+        lock = session_locks.setdefault(session_key, asyncio.Lock())
         async with lock:
             return await self._process_message(
                 msg,

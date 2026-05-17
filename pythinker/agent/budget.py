@@ -23,6 +23,10 @@ class BudgetPolicy:
         """Build a policy with clamping for misconfigured model reserves."""
         if window <= 0:
             raise ValueError(f"window must be positive, got {window}")
+        try:
+            output_reserve = int(output_reserve)
+        except (TypeError, ValueError):
+            output_reserve = 0
         max_reserve = max(0, window - 1_024)
         output_reserve = min(max(0, output_reserve), max_reserve)
         safety = max(2_048, window // 64)

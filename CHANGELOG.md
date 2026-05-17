@@ -6,6 +6,12 @@ All notable user-visible changes to Pythinker land here. The project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- WhatsApp media downloads now pass Baileys' media reupload callback, retry transient fetch
+  failures, skip undecryptable payloads with sanitized metadata, and redact upstream Signal
+  session objects from bridge console output.
+
 ## [2.5.1] - 2026-05-17
 
 ### Added

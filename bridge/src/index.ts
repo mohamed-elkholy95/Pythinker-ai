@@ -22,9 +22,78 @@ if (!globalThis.crypto) {
   (globalThis as any).crypto = webcrypto;
 }
 
-import { BridgeServer } from './server.js';
 import { homedir } from 'os';
 import { join } from 'path';
+
+const SENSITIVE_CONSOLE_KEYS = new Set([
+  'auth',
+  'baseKey',
+  'chainKey',
+  'creds',
+  'currentRatchet',
+  'ephemeralKeyPair',
+  'lastRemoteEphemeralKey',
+  'mediaKey',
+  'messageKeys',
+  'pendingPreKey',
+  'privKey',
+  'remoteIdentityKey',
+  'rootKey',
+  'sessions',
+]);
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Object.prototype.toString.call(value) === '[object Object]';
+}
+
+function isSignalSessionLike(value: unknown): boolean {
+  if (!isPlainObject(value)) return false;
+  return Boolean(value.registrationId && value.currentRatchet && value.indexInfo);
+}
+
+function redactConsoleValue(value: unknown, seen = new WeakSet<object>(), depth = 0): unknown {
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(value)) {
+    return `<Buffer redacted length=${value.length}>`;
+  }
+  if (value instanceof Uint8Array) {
+    return `<Uint8Array redacted length=${value.byteLength}>`;
+  }
+  if (value instanceof Error) {
+    const error = value as Error & { code?: unknown; status?: unknown; output?: { statusCode?: unknown } };
+    return {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      status: error.status || error.output?.statusCode,
+    };
+  }
+  if (!value || typeof value !== 'object') return value;
+  if (seen.has(value)) return '[Circular]';
+  if (isSignalSessionLike(value)) return '[redacted Signal session]';
+  if (depth >= 4) return '[Object]';
+
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => redactConsoleValue(item, seen, depth + 1));
+  }
+
+  const redacted: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    redacted[key] = SENSITIVE_CONSOLE_KEYS.has(key)
+      ? '[redacted]'
+      : redactConsoleValue(nested, seen, depth + 1);
+  }
+  return redacted;
+}
+
+function installConsoleRedaction(): void {
+  for (const method of ['debug', 'error', 'info', 'log', 'warn'] as const) {
+    const original = console[method].bind(console);
+    console[method] = (...args: unknown[]) => original(...args.map((arg) => redactConsoleValue(arg)));
+  }
+}
+
+installConsoleRedaction();
 
 const PORT = parseInt(process.env.BRIDGE_PORT || '3001', 10);
 const AUTH_DIR = process.env.AUTH_DIR || join(homedir(), '.pythinker', 'whatsapp-auth');
@@ -51,6 +120,9 @@ if (!TOKEN) {
 console.log('🤖 pythinker WhatsApp Bridge');
 console.log('========================\n');
 
+// Load Baileys after installing console redaction so upstream libsignal
+// diagnostics cannot print Signal session keys to stdout/stderr.
+const { BridgeServer } = await import('./server.js');
 const server = new BridgeServer(PORT, AUTH_DIR, TOKEN, PAIRING_PHONE, TUNING);
 
 // Handle graceful shutdown

@@ -20,6 +20,9 @@ import { join, basename } from 'path';
 import { randomBytes } from 'crypto';
 
 const VERSION = '0.1.0';
+const MEDIA_DOWNLOAD_ATTEMPTS = 3;
+const MEDIA_RETRY_BASE_MS = 500;
+const MEDIA_RETRY_MAX_MS = 2500;
 
 type PresenceState = 'available' | 'unavailable' | 'composing' | 'recording' | 'paused';
 
@@ -48,6 +51,7 @@ export interface WhatsAppClientOptions {
 export class WhatsAppClient {
   private sock: any = null;
   private options: WhatsAppClientOptions;
+  private mediaLogger = pino({ level: 'silent' });
   private reconnecting = false;
   private pairingCodeRequested = false;
   private pairingNoticePrinted = false;
@@ -199,20 +203,40 @@ export class WhatsAppClient {
 
         if (unwrapped.imageMessage) {
           fallbackContent = '[Image]';
-          const path = await this.downloadMedia(msg, unwrapped.imageMessage.mimetype ?? undefined);
+          const path = await this.downloadMedia(
+            msg,
+            'imageMessage',
+            unwrapped.imageMessage,
+            unwrapped.imageMessage.mimetype ?? undefined,
+          );
           if (path) mediaPaths.push(path);
         } else if (unwrapped.documentMessage) {
           fallbackContent = '[Document]';
-          const path = await this.downloadMedia(msg, unwrapped.documentMessage.mimetype ?? undefined,
-            unwrapped.documentMessage.fileName ?? undefined);
+          const path = await this.downloadMedia(
+            msg,
+            'documentMessage',
+            unwrapped.documentMessage,
+            unwrapped.documentMessage.mimetype ?? undefined,
+            unwrapped.documentMessage.fileName ?? undefined,
+          );
           if (path) mediaPaths.push(path);
         } else if (unwrapped.videoMessage) {
           fallbackContent = '[Video]';
-          const path = await this.downloadMedia(msg, unwrapped.videoMessage.mimetype ?? undefined);
+          const path = await this.downloadMedia(
+            msg,
+            'videoMessage',
+            unwrapped.videoMessage,
+            unwrapped.videoMessage.mimetype ?? undefined,
+          );
           if (path) mediaPaths.push(path);
         } else if (unwrapped.audioMessage) {
           fallbackContent = '[Voice Message]';
-          const path = await this.downloadMedia(msg, unwrapped.audioMessage.mimetype ?? undefined);
+          const path = await this.downloadMedia(
+            msg,
+            'audioMessage',
+            unwrapped.audioMessage,
+            unwrapped.audioMessage.mimetype ?? undefined,
+          );
           if (path) mediaPaths.push(path);
         }
 
@@ -236,18 +260,31 @@ export class WhatsAppClient {
     });
   }
 
-  private async downloadMedia(msg: any, mimetype?: string, fileName?: string): Promise<string | null> {
+  private async downloadMedia(
+    msg: any,
+    mediaType: string,
+    mediaNode: any,
+    mimetype?: string,
+    fileName?: string,
+  ): Promise<string | null> {
+    const metadata = this.describeMedia(msg, mediaType, mediaNode);
+    const validationError = this.validateMediaForDownload(mediaNode);
+    if (validationError) {
+      console.warn('Skipping WhatsApp media download:', { ...metadata, reason: validationError });
+      return null;
+    }
+
     try {
       const mediaDir = join(this.options.authDir, '..', 'media');
       await mkdir(mediaDir, { recursive: true });
 
-      const buffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer;
+      const buffer = await this.downloadMediaBufferWithRetry(msg, metadata);
 
       let outFilename: string;
       if (fileName) {
         // Documents have a filename — use it with a unique prefix to avoid collisions
         const prefix = `wa_${Date.now()}_${randomBytes(4).toString('hex')}_`;
-        outFilename = prefix + fileName;
+        outFilename = prefix + basename(fileName);
       } else {
         const mime = mimetype || 'application/octet-stream';
         // Derive extension from mimetype subtype (e.g. "image/png" → ".png", "application/pdf" → ".pdf")
@@ -260,9 +297,147 @@ export class WhatsAppClient {
 
       return filepath;
     } catch (err) {
-      console.error('Failed to download media:', err);
+      console.warn('WhatsApp media download failed:', {
+        ...metadata,
+        error: this.describeMediaDownloadError(err),
+      });
       return null;
     }
+  }
+
+  private async downloadMediaBufferWithRetry(
+    msg: any,
+    metadata: Record<string, unknown>,
+  ): Promise<Buffer> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= MEDIA_DOWNLOAD_ATTEMPTS; attempt += 1) {
+      try {
+        const ctx = this.sock?.updateMediaMessage
+          ? {
+              logger: this.mediaLogger,
+              reuploadRequest: this.sock.updateMediaMessage.bind(this.sock),
+            }
+          : undefined;
+        return await downloadMediaMessage(msg, 'buffer', {}, ctx) as Buffer;
+      } catch (err) {
+        lastError = err;
+        if (attempt >= MEDIA_DOWNLOAD_ATTEMPTS || !this.shouldRetryMediaDownload(err)) {
+          throw err;
+        }
+        const delayMs = this.mediaRetryDelayMs(attempt);
+        console.warn('WhatsApp media download attempt failed; retrying:', {
+          ...metadata,
+          attempt,
+          nextAttempt: attempt + 1,
+          delayMs,
+          error: this.describeMediaDownloadError(err),
+        });
+        await this.sleep(delayMs);
+      }
+    }
+    throw lastError;
+  }
+
+  private validateMediaForDownload(mediaNode: any): string | null {
+    if (!this.hasUsableMediaKey(mediaNode?.mediaKey)) {
+      return 'missing mediaKey; media cannot be decrypted';
+    }
+
+    const hasDirectPath = typeof mediaNode?.directPath === 'string' && mediaNode.directPath.length > 0;
+    const hasThumbnailDirectPath = typeof mediaNode?.thumbnailDirectPath === 'string'
+      && mediaNode.thumbnailDirectPath.length > 0;
+    const hasMmgUrl = typeof mediaNode?.url === 'string'
+      && mediaNode.url.startsWith('https://mmg.whatsapp.net/');
+    if (!hasDirectPath && !hasThumbnailDirectPath && !hasMmgUrl) {
+      return 'missing valid media URL/directPath';
+    }
+
+    return null;
+  }
+
+  private hasUsableMediaKey(mediaKey: unknown): boolean {
+    if (typeof mediaKey === 'string') return mediaKey.trim().length > 0;
+    if (Buffer.isBuffer(mediaKey)) return mediaKey.byteLength > 0;
+    if (mediaKey instanceof Uint8Array) return mediaKey.byteLength > 0;
+    if (Array.isArray(mediaKey)) return mediaKey.length > 0;
+    return Boolean(mediaKey);
+  }
+
+  private shouldRetryMediaDownload(err: unknown): boolean {
+    const status = this.mediaErrorStatus(err);
+    if (status && [400, 401, 403].includes(status)) return false;
+    if (status && [408, 410, 425, 429, 500, 502, 503, 504].includes(status)) return true;
+
+    const message = this.mediaErrorMessage(err).toLowerCase();
+    if (
+      message.includes('empty media key')
+      || message.includes('no valid media url')
+      || message.includes('not a media message')
+    ) {
+      return false;
+    }
+
+    return [
+      'fetch failed',
+      'network',
+      'timeout',
+      'timed out',
+      'econnreset',
+      'etimedout',
+      'und_err',
+      'aborted',
+      'socket hang up',
+    ].some((needle) => message.includes(needle));
+  }
+
+  private mediaRetryDelayMs(attempt: number): number {
+    const base = Math.min(MEDIA_RETRY_BASE_MS * (2 ** (attempt - 1)), MEDIA_RETRY_MAX_MS);
+    return base + Math.floor(Math.random() * 250);
+  }
+
+  private describeMedia(msg: any, mediaType: string, mediaNode: any): Record<string, unknown> {
+    const remoteJid = msg?.key?.remoteJid || '';
+    return {
+      messageId: msg?.key?.id || '',
+      chatKind: remoteJid.endsWith('@newsletter')
+        ? 'newsletter'
+        : remoteJid.endsWith('@g.us') ? 'group' : 'direct',
+      mediaType,
+      mimetype: mediaNode?.mimetype,
+      hasMediaKey: this.hasUsableMediaKey(mediaNode?.mediaKey),
+      hasDirectPath: typeof mediaNode?.directPath === 'string' && mediaNode.directPath.length > 0,
+      hasThumbnailDirectPath: typeof mediaNode?.thumbnailDirectPath === 'string'
+        && mediaNode.thumbnailDirectPath.length > 0,
+      hasUrl: typeof mediaNode?.url === 'string' && mediaNode.url.length > 0,
+      hasMmgUrl: typeof mediaNode?.url === 'string'
+        && mediaNode.url.startsWith('https://mmg.whatsapp.net/'),
+      fileLength: mediaNode?.fileLength?.toString?.(),
+    };
+  }
+
+  private describeMediaDownloadError(err: unknown): Record<string, unknown> {
+    const error = err as any;
+    return {
+      name: error?.name || error?.constructor?.name || 'Error',
+      message: this.mediaErrorMessage(err),
+      status: this.mediaErrorStatus(err),
+      code: error?.code || error?.cause?.code,
+      isBoom: Boolean(error?.isBoom),
+    };
+  }
+
+  private mediaErrorMessage(err: unknown): string {
+    if (err instanceof Error) return err.message;
+    return String(err);
+  }
+
+  private mediaErrorStatus(err: unknown): number | undefined {
+    const error = err as any;
+    return error?.status || error?.output?.statusCode || error?.output?.payload?.statusCode;
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private getTextContent(message: any): string | null {

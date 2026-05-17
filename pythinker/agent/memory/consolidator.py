@@ -12,8 +12,9 @@ from loguru import logger
 # `pythinker.agent.memory.estimate_message_tokens` are observed at call time.
 # (Tests in tests/agent/test_loop_consolidation_tokens.py rely on this.)
 from pythinker.agent import memory as _memory_pkg
+from pythinker.agent.budget import BudgetPolicy
 from pythinker.agent.memory.store import MemoryStore
-from pythinker.utils.helpers import estimate_prompt_tokens_chain
+from pythinker.utils.helpers import async_estimate_prompt_tokens_chain, estimate_prompt_tokens_chain
 from pythinker.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
@@ -69,6 +70,14 @@ class Consolidator:
         self.context_window_tokens = context_window_tokens
         self.max_completion_tokens = provider.generation.max_tokens
         self.encoding = encoding
+
+    @property
+    def policy(self) -> BudgetPolicy:
+        """Return token budget zones for this consolidator's model settings."""
+        return BudgetPolicy.for_model(
+            window=self.context_window_tokens,
+            output_reserve=self.max_completion_tokens,
+        )
 
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
@@ -136,6 +145,35 @@ class Consolidator:
             encoding=self.encoding,
         )
 
+    async def async_estimate_session_prompt_tokens(
+        self,
+        session: Session,
+        *,
+        session_summary: str | None = None,
+    ) -> tuple[int, str]:
+        """Async prompt estimate for consolidation, using provider counters when available."""
+        if "estimate_session_prompt_tokens" in self.__dict__:
+            return self.estimate_session_prompt_tokens(
+                session,
+                session_summary=session_summary,
+            )
+        history = session.get_history(max_messages=0)
+        channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
+        probe_messages = self._build_messages(
+            history=history,
+            current_message="[token-probe]",
+            channel=channel,
+            chat_id=chat_id,
+            session_summary=session_summary,
+        )
+        return await async_estimate_prompt_tokens_chain(
+            self.provider,
+            self.model,
+            probe_messages,
+            self._get_tool_definitions(),
+            encoding=self.encoding,
+        )
+
     async def archive(self, messages: list[dict]) -> str | None:
         """Summarize messages via LLM and append to history.jsonl.
 
@@ -186,10 +224,11 @@ class Consolidator:
 
         lock = self.get_lock(session.key)
         async with lock:
-            budget = self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
-            target = budget // 2
+            policy = self.policy
+            budget = policy.soft
+            target = policy.target
             try:
-                estimated, source = self.estimate_session_prompt_tokens(
+                estimated, source = await self.async_estimate_session_prompt_tokens(
                     session,
                     session_summary=session_summary,
                 )
@@ -256,7 +295,7 @@ class Consolidator:
                 self.sessions.save(session)
 
                 try:
-                    estimated, source = self.estimate_session_prompt_tokens(
+                    estimated, source = await self.async_estimate_session_prompt_tokens(
                         session,
                         session_summary=session_summary,
                     )

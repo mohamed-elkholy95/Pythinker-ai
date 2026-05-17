@@ -32,7 +32,7 @@ def _make_loop(tmp_path, *, estimated_tokens: int, context_window_tokens: int) -
 
 @pytest.mark.asyncio
 async def test_prompt_below_threshold_does_not_consolidate(tmp_path) -> None:
-    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
+    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=4296)
     loop.consolidator.archive = AsyncMock(return_value=True)  # type: ignore[method-assign]
 
     await loop.process_direct("hello", session_key="cli:test")
@@ -42,7 +42,7 @@ async def test_prompt_below_threshold_does_not_consolidate(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_prompt_above_threshold_triggers_consolidation(tmp_path, monkeypatch) -> None:
-    loop = _make_loop(tmp_path, estimated_tokens=1000, context_window_tokens=200)
+    loop = _make_loop(tmp_path, estimated_tokens=1000, context_window_tokens=4296)
     loop.consolidator.archive = AsyncMock(return_value=True)  # type: ignore[method-assign]
     session = loop.sessions.get_or_create("cli:test")
     session.messages = [
@@ -60,7 +60,7 @@ async def test_prompt_above_threshold_triggers_consolidation(tmp_path, monkeypat
 
 @pytest.mark.asyncio
 async def test_prompt_above_threshold_archives_until_next_user_boundary(tmp_path, monkeypatch) -> None:
-    loop = _make_loop(tmp_path, estimated_tokens=1000, context_window_tokens=200)
+    loop = _make_loop(tmp_path, estimated_tokens=1000, context_window_tokens=4296)
     loop.consolidator.archive = AsyncMock(return_value=True)  # type: ignore[method-assign]
 
     session = loop.sessions.get_or_create("cli:test")
@@ -86,7 +86,7 @@ async def test_prompt_above_threshold_archives_until_next_user_boundary(tmp_path
 @pytest.mark.asyncio
 async def test_consolidation_loops_until_target_met(tmp_path, monkeypatch) -> None:
     """Verify maybe_consolidate_by_tokens keeps looping until under threshold."""
-    loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
+    loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=4296)
     loop.consolidator.archive = AsyncMock(return_value=True)  # type: ignore[method-assign]
 
     session = loop.sessions.get_or_create("cli:test")
@@ -122,7 +122,7 @@ async def test_consolidation_loops_until_target_met(tmp_path, monkeypatch) -> No
 @pytest.mark.asyncio
 async def test_consolidation_continues_below_trigger_until_half_target(tmp_path, monkeypatch) -> None:
     """Once triggered, consolidation should continue until it drops below half threshold."""
-    loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
+    loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=4296)
     loop.consolidator.archive = AsyncMock(return_value=True)  # type: ignore[method-assign]
 
     session = loop.sessions.get_or_create("cli:test")
@@ -158,7 +158,7 @@ async def test_consolidation_continues_below_trigger_until_half_target(tmp_path,
 
 @pytest.mark.asyncio
 async def test_consolidation_persists_summary_for_next_prepare_session(tmp_path, monkeypatch) -> None:
-    loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
+    loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=4296)
     loop.consolidator.archive = AsyncMock(return_value="User discussed project status.")  # type: ignore[method-assign]
 
     session = loop.sessions.get_or_create("cli:test")
@@ -195,7 +195,7 @@ async def test_consolidation_persists_summary_for_next_prepare_session(tmp_path,
 
 @pytest.mark.asyncio
 async def test_preflight_consolidation_receives_pending_summary(tmp_path) -> None:
-    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
+    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=4296)
     session = loop.sessions.get_or_create("cli:test")
     loop.auto_compact.prepare_session = MagicMock(
         return_value=(session, "Previous conversation summary: earlier context")
@@ -216,7 +216,7 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
     """Verify preflight consolidation runs before the LLM call in process_direct."""
     order: list[str] = []
 
-    loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
+    loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=4296)
 
     async def track_consolidate(messages):
         order.append("consolidate")

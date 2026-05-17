@@ -55,7 +55,7 @@ def consolidator(store, mock_provider):
         provider=mock_provider,
         model="test-model",
         sessions=sessions,
-        context_window_tokens=1000,
+        context_window_tokens=5100,
         build_messages=MagicMock(return_value=[]),
         get_tool_definitions=MagicMock(return_value=[]),
         max_completion_tokens=100,
@@ -191,3 +191,23 @@ class TestConsolidatorTokenBudget:
 
         consolidator.archive.assert_not_awaited()
         assert session.last_consolidated == 0
+
+
+def test_consolidator_uses_budget_policy_target(tmp_path, monkeypatch):
+    """Consolidation target should be policy.target, not hand-rolled offsets."""
+    from pythinker.agent.budget import BudgetPolicy
+    from pythinker.agent.memory.consolidator import Consolidator
+
+    consolidator = Consolidator(
+        store=MagicMock(),
+        provider=MagicMock(generation=MagicMock(max_tokens=24_000)),
+        model="gpt-5.5",
+        sessions=MagicMock(),
+        context_window_tokens=272_000,
+        build_messages=lambda **_: [],
+        get_tool_definitions=lambda: [],
+        max_completion_tokens=24_000,
+    )
+    expected = BudgetPolicy.for_model(window=272_000, output_reserve=24_000)
+    assert consolidator.policy.target == expected.target
+    assert consolidator.policy.soft == expected.soft

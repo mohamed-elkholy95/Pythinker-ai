@@ -32,6 +32,8 @@ if TYPE_CHECKING:
 class SpawnTool(Tool):
     """Tool to spawn a subagent for background task execution."""
 
+    compactable = False
+
     def __init__(self, manager: "SubagentManager"):
         self._manager = manager
         self._origin_channel: ContextVar[str] = ContextVar("spawn_origin_channel", default="cli")

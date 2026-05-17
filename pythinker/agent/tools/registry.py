@@ -113,6 +113,10 @@ class ToolRegistry:
         except Exception as e:
             return f"Error executing {name}: {str(e)}" + hint
 
+    def items(self):
+        """Return registered ``(name, tool)`` pairs."""
+        return self._tools.items()
+
     @property
     def tool_names(self) -> list[str]:
         """Get list of registered tool names."""

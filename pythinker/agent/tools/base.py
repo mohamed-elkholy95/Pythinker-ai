@@ -117,6 +117,9 @@ class Schema(ABC):
 class Tool(ABC):
     """Agent capability: read files, run commands, etc."""
 
+    compactable: bool = True
+    """Whether old large results may be replaced by a short microcompact stub."""
+
     _TYPE_MAP = {
         "string": str,
         "integer": int,

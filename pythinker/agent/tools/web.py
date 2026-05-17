@@ -84,6 +84,7 @@ def _format_results(query: str, items: list[dict[str, Any]], n: int) -> str:
 class WebSearchTool(Tool):
     """Search the web using configured provider."""
 
+    compactable = False
     name = "web_search"
     description = (
         "Search the web. Returns titles, URLs, and snippets. "
@@ -302,6 +303,7 @@ class WebSearchTool(Tool):
 class WebFetchTool(Tool):
     """Fetch and extract content from a URL."""
 
+    compactable = False
     name = "web_fetch"
     description = (
         "Fetch a URL and extract readable content (HTML → markdown/text). "

@@ -23,6 +23,8 @@ from pythinker.bus.events import OutboundMessage
 class MessageTool(Tool):
     """Tool to send messages to users on chat channels."""
 
+    compactable = False
+
     def __init__(
         self,
         send_callback: Callable[[OutboundMessage], Awaitable[None]] | None = None,

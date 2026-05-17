@@ -1,40 +1,40 @@
-"""Provider input/output token-limit helpers.
-
-Pure-functional helpers that depend only on a ``LLMProvider`` instance and a
-model id. Lives outside ``pythinker/agent/loop.py`` so the loop can stay
-focused on lifecycle, dispatch, and checkpointing.
-"""
+"""Provider input-window derivation helpers."""
 
 from __future__ import annotations
 
 from loguru import logger
 
 from pythinker.providers.base import LLMProvider
+from pythinker.providers.model_profiles import get_profile
+
+_LEGACY_DEFAULT = 65_536
 
 
-def clamp_context_window(provider: LLMProvider, model: str, configured: int) -> int:
-    """Clamp ``configured`` to the provider's published input cap.
-
-    Some plans publish hard limits the server enforces (e.g. ChatGPT/Codex
-    OAuth caps gpt-5.5 input at 272k tokens). Without this, configured
-    windows exceeding the cap drive silent server-side overflow after
-    compaction has already trusted the larger budget.
-    """
-    limits = provider.get_model_limits(model)
-    if not isinstance(limits, dict):
-        return configured
-    input_cap = limits.get("input")
-    if not isinstance(input_cap, int) or input_cap <= 0:
-        return configured
-    if configured > input_cap:
-        logger.info(
-            "Clamping context_window_tokens {} → {} for model {} (provider cap)",
-            configured, input_cap, model,
-        )
-        return input_cap
+def derive_window(provider: LLMProvider, model: str, configured: int | None) -> int:
+    """Pick the largest safe input window for ``model``."""
+    profile = get_profile(model)
+    provider_cap = None
+    try:
+        limits = provider.get_model_limits(model)
+    except Exception as exc:
+        logger.debug("provider.get_model_limits({}) raised: {}", model, exc)
+        limits = None
+    if isinstance(limits, dict):
+        cap = limits.get("input")
+        if isinstance(cap, int) and cap > 0:
+            provider_cap = cap
+    cap = provider_cap if provider_cap is not None else (profile.input if profile else None)
+    if configured is None:
+        return cap or _LEGACY_DEFAULT
+    if cap is not None and configured > cap:
+        logger.info("Clamping context_window_tokens {} → {} for model {} (cap)", configured, cap, model)
+        return cap
     return configured
 
 
-# Compatibility alias so ``from pythinker.providers.limits import _clamp_context_window``
-# also works for any caller that retained the leading-underscore name during the move.
+def clamp_context_window(provider: LLMProvider, model: str, configured: int) -> int:
+    """Backwards-compatible one-way clamp wrapper."""
+    return derive_window(provider, model, configured)
+
+
 _clamp_context_window = clamp_context_window

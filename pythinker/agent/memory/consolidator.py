@@ -39,6 +39,7 @@ class Consolidator:
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
         max_completion_tokens: int = 4096,
+        encoding: str = "cl100k_base",
     ):
         self.store = store
         self.provider = provider
@@ -46,6 +47,7 @@ class Consolidator:
         self.sessions = sessions
         self.context_window_tokens = context_window_tokens
         self.max_completion_tokens = max_completion_tokens
+        self.encoding = encoding
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
@@ -57,6 +59,7 @@ class Consolidator:
         provider: LLMProvider,
         model: str,
         context_window_tokens: int,
+        encoding: str = "cl100k_base",
     ) -> None:
         """Hot-swap provider+model+context-window. Called from
         AgentLoop._apply_provider_snapshot. ``max_completion_tokens`` follows
@@ -65,6 +68,7 @@ class Consolidator:
         self.model = model
         self.context_window_tokens = context_window_tokens
         self.max_completion_tokens = provider.generation.max_tokens
+        self.encoding = encoding
 
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
@@ -129,6 +133,7 @@ class Consolidator:
             self.model,
             probe_messages,
             self._get_tool_definitions(),
+            encoding=self.encoding,
         )
 
     async def archive(self, messages: list[dict]) -> str | None:

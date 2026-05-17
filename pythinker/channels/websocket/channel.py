@@ -688,6 +688,10 @@ class WebSocketChannel(BaseChannel):
         if data is None:
             return _http_error(404, "session not found")
         from pythinker.agent.usage import estimate_session_usage
+        from pythinker.providers.model_profiles import get_profile
+
+        profile = get_profile(self._agent_defaults.model)
+        encoding = profile.encoding if profile else "cl100k_base"
 
         # ``estimate_session_usage`` only touches ``.messages`` on the input;
         # build a tiny shim around the raw dict so we don't have to reconstruct
@@ -695,7 +699,11 @@ class WebSocketChannel(BaseChannel):
         class _SessionView:
             messages = data.get("messages", []) if isinstance(data, dict) else []
 
-        usage = estimate_session_usage(_SessionView(), self._agent_defaults)  # type: ignore[arg-type]
+        usage = estimate_session_usage(
+            _SessionView(),  # type: ignore[arg-type]
+            self._agent_defaults,
+            encoding=encoding,
+        )
         return _http_json_response(usage)
 
     def _handle_commands_list(self, request: WsRequest) -> Response:

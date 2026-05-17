@@ -21,7 +21,12 @@ class SessionUsage(TypedDict):
     limit: int
 
 
-def estimate_session_usage(session: Session, defaults: AgentDefaults) -> SessionUsage:
+def estimate_session_usage(
+    session: Session,
+    defaults: AgentDefaults,
+    *,
+    encoding: str = "cl100k_base",
+) -> SessionUsage:
     """Return the WebUI-friendly token usage snapshot for *session*.
 
     Skips the chain helper (which needs a live provider instance) and goes
@@ -32,7 +37,7 @@ def estimate_session_usage(session: Session, defaults: AgentDefaults) -> Session
     """
     if not session.messages:
         return {"used": 0, "limit": defaults.context_window_tokens}
-    used = estimate_prompt_tokens(session.messages, None)
+    used = estimate_prompt_tokens(session.messages, None, encoding=encoding)
     if used == 0:
         logger.warning(
             "estimate_prompt_tokens returned 0 for a non-empty session; "

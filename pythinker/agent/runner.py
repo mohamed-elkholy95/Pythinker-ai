@@ -101,6 +101,7 @@ class AgentRunSpec:
     session_key: str | None = None
     context_window_tokens: int | None = None
     context_block_limit: int | None = None
+    encoding: str = "cl100k_base"
     provider_retry_mode: str = "standard"
     progress_callback: Any | None = None
     retry_wait_callback: Any | None = None
@@ -1162,6 +1163,7 @@ class AgentRunner:
             spec.model,
             messages,
             spec.tools.get_definitions(),
+            encoding=spec.encoding,
         )
         if estimate <= budget:
             return messages

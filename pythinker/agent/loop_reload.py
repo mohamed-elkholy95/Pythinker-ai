@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from pythinker.providers.limits import clamp_context_window
+from pythinker.providers.model_profiles import get_profile
 
 if TYPE_CHECKING:
     from pythinker.agent.loop import AgentLoop
@@ -37,9 +38,12 @@ def apply_provider_snapshot(loop: "AgentLoop", snapshot: "ProviderSnapshot") -> 
     loop.provider = provider
     loop.model = model
     loop.context_window_tokens = context_window_tokens
+    profile = get_profile(model)
+    encoding = profile.encoding if profile else "cl100k_base"
+    loop._encoding = encoding
     loop.runner.provider = provider
     loop.subagents.set_provider(provider, model)
-    loop.consolidator.set_provider(provider, model, context_window_tokens)
+    loop.consolidator.set_provider(provider, model, context_window_tokens, encoding=encoding)
     loop.dream.set_provider(provider, model)
     loop._provider_signature = snapshot.signature
     logger.info("Runtime model switched for next turn: {} -> {}", old_model, model)

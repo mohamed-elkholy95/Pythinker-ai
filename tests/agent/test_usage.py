@@ -43,7 +43,7 @@ def test_logs_warning_when_estimator_returns_zero_for_non_empty_session(monkeypa
 
     monkeypatch.setattr(
         "pythinker.agent.usage.estimate_prompt_tokens",
-        lambda _msgs, _tools: 0,
+        lambda _msgs, _tools, **_kwargs: 0,
     )
 
     # Use loguru's propagate-to-stdlib hook for caplog capture.

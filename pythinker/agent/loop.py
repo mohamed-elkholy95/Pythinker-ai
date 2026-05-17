@@ -33,6 +33,7 @@ from pythinker.command import CommandContext, CommandRouter, register_builtin_co
 from pythinker.config.schema import AgentDefaults
 from pythinker.providers.base import LLMProvider
 from pythinker.providers.limits import derive_window
+from pythinker.providers.model_profiles import get_profile
 from pythinker.runtime.egress import ToolEgressGateway
 from pythinker.runtime.policy import PolicyService
 from pythinker.session.manager import Session, SessionManager
@@ -263,6 +264,8 @@ class AgentLoop:
             self.model,
             context_window_tokens,
         )
+        profile = get_profile(self.model)
+        self._encoding = profile.encoding if profile else "cl100k_base"
         self.context_block_limit = context_block_limit
         self.max_tool_result_chars = (
             max_tool_result_chars
@@ -334,6 +337,7 @@ class AgentLoop:
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
+            encoding=self._encoding,
         )
         self.auto_compact = AutoCompact(
             sessions=self.sessions,
@@ -859,6 +863,7 @@ class AgentLoop:
             session_key=session.key if session else None,
             context_window_tokens=self.context_window_tokens,
             context_block_limit=self.context_block_limit,
+            encoding=self._encoding,
             provider_retry_mode=self.provider_retry_mode,
             progress_callback=on_progress,
             retry_wait_callback=on_retry_wait,

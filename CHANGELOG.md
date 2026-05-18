@@ -6,6 +6,8 @@ All notable user-visible changes to Pythinker land here. The project follows
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-05-18
+
 ### Fixed
 
 - WhatsApp media downloads now pass Baileys' media reupload callback, retry transient fetch
